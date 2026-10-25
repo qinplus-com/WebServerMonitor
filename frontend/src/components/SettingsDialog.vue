@@ -125,27 +125,17 @@ const activating = ref(false)
 const licenseCode = ref('')
 
 const licenseInfo = reactive({
-  edition: 'personal',
-  max_servers: 3,
+  edition: 'community',
+  max_servers: 0,
   expire_at: '',
   issued_to: '',
   is_trial: false,
   days_left: -1
 })
 
-// 版本代号 → 展示名/标签颜色：企业版（绿）、中小企业板（橙）、社区版（蓝）、个人版（灰蓝）
-const editionName = (ed) => {
-  if (ed === 'enterprise') return '企业版'
-  if (ed === 'sme') return '中小企业板'
-  if (ed === 'community') return '社区版'
-  return '个人版'
-}
-const editionTagType = (ed) => {
-  if (ed === 'enterprise') return 'success'
-  if (ed === 'sme') return 'warning'
-  if (ed === 'community') return 'primary'
-  return 'info'
-}
+// 版本代号 → 展示名/标签颜色：企业版（绿）、社区版（蓝），其余一律按社区版展示
+const editionName = (ed) => ed === 'enterprise' ? '企业版' : '社区版'
+const editionTagType = (ed) => ed === 'enterprise' ? 'success' : 'primary'
 
 const channels = [
   {

@@ -21,7 +21,7 @@ type Config struct {
 }
 
 type LicenseConfig struct {
-	Edition string `yaml:"edition"` // personal | sme | enterprise
+	Edition string `yaml:"edition"` // community | enterprise
 }
 
 type ServerConfig struct {
@@ -64,7 +64,7 @@ func DefaultConfig() *Config {
 		JWT:      JWTConfig{Secret: "qinjiagateway-default-secret", Expire: 7200, RefreshExpire: 604800},
 		Admin:    AdminConfig{Username: "admin", Password: "admin123"},
 		App:      AppConfig{Name: "勤加软件WEB服务器运维管理平台", ServiceName: "QinJiaGateway"},
-		License:  LicenseConfig{Edition: "personal"},
+		License:  LicenseConfig{Edition: "community"},
 	}
 }
 

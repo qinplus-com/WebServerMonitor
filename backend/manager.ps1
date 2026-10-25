@@ -160,7 +160,7 @@ function Start-Svc {
     if ((Get-SvcStatus) -ne 'Running') {
         $logHint = Join-Path $dataDir 'logs'
         [System.Windows.Forms.MessageBox]::Show(
-            "服务启动失败或已退出。`n`n$out`n`n详细原因请查看日志目录：`n$logHint`n（gateway-日期.log）`n`n常见原因：数据目录复制自其他机器导致授权校验失败（个人版限 3 台）。",
+            "服务启动失败或已退出。`n`n$out`n`n详细原因请查看日志目录：`n$logHint`n（gateway-日期.log）`n`n常见原因：端口被占用、数据目录权限不足。",
             '启动失败', 'OK', 'Error') | Out-Null
     }
 }
@@ -287,12 +287,9 @@ function Refresh-License {
             $lblLicVer.Text = '当前授权：企业版正式授权（不限服务器数量）'
             $lblLicVer.ForeColor = $greenColor
         }
-    } elseif ($li.edition -eq 'sme') {
-        $lblLicVer.Text = "当前授权：中小企业板正式授权（限 10 台，已有 $($li.servers) 台）"
-        $lblLicVer.ForeColor = $greenColor
     } else {
-        $lblLicVer.Text = "当前授权：个人版（限 3 台，已有 $($li.servers) 台）"
-        $lblLicVer.ForeColor = $darkColor
+        $lblLicVer.Text = '当前授权：社区版（无服务器数量与使用期限限制）'
+        $lblLicVer.ForeColor = $greenColor
     }
     if ($li.days_left -eq '-1') {
         $lblLicExpire.Text = '有效期：永久授权，无使用期限限制'
@@ -305,7 +302,7 @@ function Refresh-License {
     if ($li.issued_to) {
         $lblLicTo.Text = "授权对象：$($li.issued_to)"
     } else {
-        $lblLicTo.Text = '授权对象：—（个人版 / 本机试用）'
+        $lblLicTo.Text = '授权对象：—（社区版）'
     }
     $lblLicTo.ForeColor = $darkColor
     return $li
