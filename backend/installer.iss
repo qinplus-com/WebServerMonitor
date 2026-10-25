@@ -1,6 +1,7 @@
 ﻿; ============================================================
-; 勤加软件WEB服务器运维管理平台 - Inno Setup 安装脚本
-; 支持安装时自定义软件名称（平台标题/服务名/快捷方式联动）+ 用户协议
+; WebServerMonitor（勤加软件WEB服务器运维管理平台）社区版 - Inno Setup 安装脚本
+; 支持安装时自定义软件名称（平台标题/服务名/快捷方式联动）；
+; 向导含 Apache-2.0 许可协议页与社区版说明页（无商业版本选择/授权流程）
 ; ============================================================
 #define MyAppVersion "1.0.0"
 #define DefaultAppName "勤加软件WEB服务器运维管理平台"
@@ -22,6 +23,8 @@ Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 DisableWelcomePage=no
+; 社区版（Apache-2.0）：向导中展示开源许可协议全文（替代原商业 EULA）
+LicenseFile=..\LICENSE
 VersionInfoDescription={#DefaultAppName}安装程序
 VersionInfoProductName={#DefaultAppName}
 WizardImageFile=wizard-image-164.bmp,wizard-image-328.bmp
@@ -42,7 +45,8 @@ Source: "app.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "manager.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "manager.vbs"; DestDir: "{app}"; Flags: ignoreversion
 Source: "qinplus.png"; DestDir: "{app}"; Flags: ignoreversion
-; 社区版无需授权：不附带主机指纹采集工具（fingerprint）与商业授权流程
+Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+; 社区版随包分发 Apache-2.0 许可证文本（LICENSE）；
 
 [Icons]
 ; 快捷方式说明：
@@ -65,17 +69,13 @@ Type: files; Name: "{app}\config.yaml"
 var
   NamePage, SettingsPage, PrevDirPage, EditionPage: TWizardPage;
   DataPage: TInputDirWizardPage;
-  AppNameLbl, SvcLbl, PrevDirLbl, PrevDirTip, EditionLbl: TNewStaticText;
+  AppNameLbl, SvcLbl, PrevDirLbl, PrevDirTip, EditionLbl, EditionDesc: TNewStaticText;
   PrevDirEdit: TNewEdit;
   AppNameEdit, SvcEdit: TNewEdit;
   PortLbl, UserLbl, PassLbl, TipLbl: TNewStaticText;
   PortEdit, UserEdit: TNewEdit;
   PassEdit: TPasswordEdit;
-  PersonalRadio, EnterpriseRadio, TrialRadio, HasLicenseRadio: TNewRadioButton;
-  FingerprintTip, LicenseFileLbl: TNewStaticText;
-  LicenseFileEdit: TNewEdit;
-  LicenseFileBtn: TNewButton;
-  AppNameValue, SvcValue, PortValue, DataDirValue, PrevDirValue, EditionValue, LicenseFileValue: String;
+  AppNameValue, SvcValue, PortValue, DataDirValue, PrevDirValue: String;
   UpgradeMode: Boolean; // 已安装版本直接覆盖更新模式（/SILENT /UPGRADE=1，保留配置与数据）
   AdminExplicit: Boolean; // 命令行显式传入完整 /ADMIN= 和 /PASS=（升级模式下据此决定是否更新数据库管理员）
   CompletionOpenWeb, CompletionOpenMgr: Boolean; // 安装完成提示窗体的勾选结果
@@ -202,81 +202,6 @@ begin
   end;
 end;
 
-// 读取命令行 /EDITION 参数（personal|enterprise），默认 personal
-function GetEditionParam(): String;
-var s: String;
-begin
-  s := GetCmdParam('EDITION', '');
-  if s = '' then s := 'personal';
-  Result := s;
-end;
-
-// 读取命令行 /LICFILE 参数（授权文件路径，仅在已获取授权时使用）
-// 指定了授权文件则隐含企业版
-function GetLicenseFileParam(): String;
-begin
-  Result := GetCmdParam('LICFILE', '');
-end;
-
-// 版本选择统一判定：返回空串表示通过，否则返回错误提示
-// personal=True          → 个人版
-// personal=False, hasLic=False → 企业版试用
-// personal=False, hasLic=True  → 企业版正式（校验授权文件路径）
-function CheckEditionChoice(personal, hasLic, licPath: String; var edition, licFile: String): String;
-begin
-  if personal = '1' then begin
-    edition := 'personal';
-    licFile := '';
-    Result := '';
-    Exit;
-  end;
-  edition := 'enterprise';
-  if hasLic = '1' then begin
-    licPath := Trim(licPath);
-    if licPath = '' then begin
-      Result := '请选择授权文件（.lic 或 .lic.txt），或改选「先试用」。';
-      Exit;
-    end;
-    if not FileExists(licPath) then begin
-      Result := '授权文件不存在：' + licPath;
-      Exit;
-    end;
-    licFile := licPath;
-  end else begin
-    licFile := '';
-  end;
-  Result := '';
-end;
-
-// 版本页控件联动：企业版选中时启用子选项；按子选项切换提示文本/文件选择框
-procedure UpdateEditionUI();
-var ent, trial, hasLic: Boolean;
-begin
-  ent := EnterpriseRadio.Checked;
-  trial := ent and TrialRadio.Checked;
-  hasLic := ent and HasLicenseRadio.Checked;
-  TrialRadio.Enabled := ent;
-  HasLicenseRadio.Enabled := ent;
-  FingerprintTip.Visible := trial;
-  LicenseFileLbl.Visible := hasLic;
-  LicenseFileEdit.Visible := hasLic;
-  LicenseFileBtn.Visible := hasLic;
-end;
-
-procedure EditionRadioClick(Sender: TObject);
-begin
-  UpdateEditionUI();
-end;
-
-procedure LicenseFileBtnClick(Sender: TObject);
-var fn: String;
-begin
-  fn := LicenseFileEdit.Text;
-  if GetOpenFileName('选择授权文件', fn, '',
-    '授权文件 (*.lic)|*.lic|所有文件 (*.*)|*.*', 'lic') then
-    LicenseFileEdit.Text := fn;
-end;
-
 // 检测是否静默安装（/SILENT 或 /VERYSILENT）。
 // 直接扫描命令行尾部，不依赖 IsSilent 支持函数；仅作布尔判定，
 // 不使用 Pos 的位置值，因此 CJK 字节/字符计数差异无影响。
@@ -350,11 +275,6 @@ begin
 
   // 命令行 /UPGRADE=1 时进入升级模式（与交互确认的 UpgradeMode 取或，不覆盖）
   UpgradeMode := UpgradeMode or (GetCmdParam('UPGRADE', '') = '1');
-  EditionValue := GetEditionParam();
-  LicenseFileValue := GetLicenseFileParam();
-  // 指定授权文件隐含企业版
-  if LicenseFileValue <> '' then
-    EditionValue := 'enterprise';
   Result := True;
 end;
 
@@ -436,77 +356,24 @@ begin
     + #13#10 + #13#10 + '首次启动时将自动检测数据库：若表结构有变更将执行迁移，'
     + '服务器密码/私钥等敏感字段将自动加密存储，无需手动操作。';
 
-  // 版本选择页：个人版 / 企业版（默认试用；已获取授权可直接选择授权文件）
-  EditionPage := CreateCustomPage(PrevDirPage.ID, '选择版本', '请选择要安装的版本');
+  // 版本说明页：社区版（开源）单版本，无商业版本选择与授权流程
+  EditionPage := CreateCustomPage(PrevDirPage.ID, '版本说明', '本安装包为社区版（Apache-2.0 开源）');
 
   EditionLbl := TNewStaticText.Create(EditionPage);
   EditionLbl.Parent := EditionPage.Surface;
-  EditionLbl.Top := ScaleY(4);
-  EditionLbl.Caption := '请选择软件版本：';
+  EditionLbl.Top := ScaleY(8);
+  EditionLbl.Caption := '您正在安装：社区版 v{#MyAppVersion}（WebServerMonitor · 勤加软件WEB服务器运维管理平台）';
 
-  PersonalRadio := TNewRadioButton.Create(EditionPage);
-  PersonalRadio.Parent := EditionPage.Surface;
-  PersonalRadio.Top := ScaleY(28);
-  PersonalRadio.Width := ScaleX(380);
-  PersonalRadio.Caption := '个人版（免费，最多管理 3 台服务器）';
-  PersonalRadio.Checked := (EditionValue <> 'enterprise');
-  PersonalRadio.OnClick := @EditionRadioClick;
-
-  EnterpriseRadio := TNewRadioButton.Create(EditionPage);
-  EnterpriseRadio.Parent := EditionPage.Surface;
-  EnterpriseRadio.Top := ScaleY(52);
-  EnterpriseRadio.Width := ScaleX(380);
-  EnterpriseRadio.Caption := '企业版（不限服务器数量）';
-  EnterpriseRadio.Checked := (EditionValue = 'enterprise');
-  EnterpriseRadio.OnClick := @EditionRadioClick;
-
-  // 企业版子选项：默认「先试用」
-  TrialRadio := TNewRadioButton.Create(EditionPage);
-  TrialRadio.Parent := EditionPage.Surface;
-  TrialRadio.Top := ScaleY(78); TrialRadio.Left := ScaleX(20);
-  TrialRadio.Width := ScaleX(360);
-  TrialRadio.Caption := '先试用（30 天免费试用，全功能）';
-  TrialRadio.Checked := (EditionValue = 'enterprise') and (LicenseFileValue = '');
-  TrialRadio.OnClick := @EditionRadioClick;
-
-  HasLicenseRadio := TNewRadioButton.Create(EditionPage);
-  HasLicenseRadio.Parent := EditionPage.Surface;
-  HasLicenseRadio.Top := ScaleY(102); HasLicenseRadio.Left := ScaleX(20);
-  HasLicenseRadio.Width := ScaleX(360);
-  HasLicenseRadio.Caption := '我已有授权文件（正式授权）';
-  HasLicenseRadio.Checked := (EditionValue = 'enterprise') and (LicenseFileValue <> '');
-  HasLicenseRadio.OnClick := @EditionRadioClick;
-
-  // 试用提示：说明安装完成后如何生成主机指纹并获取正式授权
-  FingerprintTip := TNewStaticText.Create(EditionPage);
-  FingerprintTip.Parent := EditionPage.Surface;
-  FingerprintTip.Top := ScaleY(128); FingerprintTip.Left := ScaleX(40);
-  FingerprintTip.Width := ScaleX(380); FingerprintTip.Height := ScaleY(96);
-  FingerprintTip.Caption := '社区版（开源）无需授权，安装即可使用全部功能；'
-    + #13#10 + '如需商业授权（企业版 / 品牌定制），请联系软件供应商获取。';
-  FingerprintTip.Font.Style := FingerprintTip.Font.Style + [fsItalic];
-
-  // 授权文件选择：仅「我已有授权文件」选中时显示
-  LicenseFileLbl := TNewStaticText.Create(EditionPage);
-  LicenseFileLbl.Parent := EditionPage.Surface;
-  LicenseFileLbl.Top := ScaleY(130); LicenseFileLbl.Left := ScaleX(40);
-  LicenseFileLbl.Caption := '授权文件路径（.lic 或 .lic.txt）：';
-
-  LicenseFileEdit := TNewEdit.Create(EditionPage);
-  LicenseFileEdit.Parent := EditionPage.Surface;
-  LicenseFileEdit.Top := ScaleY(150); LicenseFileEdit.Left := ScaleX(40);
-  LicenseFileEdit.Width := ScaleX(290);
-  LicenseFileEdit.Text := LicenseFileValue;
-
-  LicenseFileBtn := TNewButton.Create(EditionPage);
-  LicenseFileBtn.Parent := EditionPage.Surface;
-  LicenseFileBtn.Top := ScaleY(148);
-  LicenseFileBtn.Left := ScaleX(40) + ScaleX(298);
-  LicenseFileBtn.Width := ScaleX(70); LicenseFileBtn.Height := ScaleY(23);
-  LicenseFileBtn.Caption := '浏览...';
-  LicenseFileBtn.OnClick := @LicenseFileBtnClick;
-
-  UpdateEditionUI();
+  EditionDesc := TNewStaticText.Create(EditionPage);
+  EditionDesc.Parent := EditionPage.Surface;
+  EditionDesc.Top := ScaleY(36); EditionDesc.Width := ScaleX(400);
+  EditionDesc.Height := ScaleY(120);
+  EditionDesc.Caption := '社区版遵循 Apache License 2.0 开源，无服务器数量与使用期限限制，全部功能开箱即用。'
+    + #13#10 + #13#10 + '开源仓库：'
+    + #13#10 + '  github.com/qinplus-com/WebServerMonitor'
+    + #13#10 + '  gitee.com/qinpluscom/web-server-monitor'
+    + #13#10 + #13#10 + '如需商业授权（企业版 / 品牌 OEM 定制 / 信创适配服务），请联系软件供应商获取。';
+  EditionDesc.Font.Style := EditionDesc.Font.Style + [fsItalic];
 
   // 第一页：软件名称设置
   NamePage := CreateCustomPage(wpSelectDir, '软件名称设置', '自定义平台显示名称与系统服务名');
@@ -598,25 +465,16 @@ begin
   if PageID = PrevDirPage.ID then
     Result := (Trim(PrevDirValue) = '')
   else if PageID = EditionPage.ID then
-    // 重装时（检测到旧安装目录）跳过版本选择页，保留原有版本
+    // 重装时（检测到旧安装目录）跳过社区版说明页
     Result := (Trim(PrevDirValue) <> '')
   else
     Result := False;
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
-var p: Integer; err, pFlag, lFlag: String;
+var p: Integer;
 begin
   Result := True;
-  if CurPageID = EditionPage.ID then begin
-    if PersonalRadio.Checked then pFlag := '1' else pFlag := '0';
-    if HasLicenseRadio.Checked then lFlag := '1' else lFlag := '0';
-    err := CheckEditionChoice(pFlag, lFlag, LicenseFileEdit.Text, EditionValue, LicenseFileValue);
-    if err <> '' then begin
-      MsgBox(err, mbError, MB_OK);
-      Result := False; Exit;
-    end;
-  end;
   if CurPageID = NamePage.ID then begin
     if Trim(AppNameEdit.Text) = '' then begin
       MsgBox('软件名称不能为空。', mbError, MB_OK);
@@ -763,26 +621,10 @@ begin
   Lines[12] := '  secret: "' + MakeSecret() + '"';
   Lines[13] := '  expire: 7200';
   Lines[14] := '  refresh_expire: 604800';
+  // 社区版：版本标识固定为 community（开源构建运行时直通授权校验）
   Lines[15] := 'license:';
-  Lines[16] := '  edition: ' + EditionValue;
+  Lines[16] := '  edition: community';
   SaveStringsToUTF8FileWithoutBOM(ExpandConstant('{app}\config.yaml'), Lines, False);
-  end;
-
-  // 已获取授权：将授权文件复制到数据目录 license.lic，
-  // 服务首次启动时由 gateway 自动激活（须在服务启动前完成复制）。
-  // 升级模式跳过（授权已在数据目录中，重复复制无意义）
-  if not UpgradeMode then begin
-    if LicenseFileValue <> '' then begin
-      if FileExists(LicenseFileValue) then begin
-        if CopyFile(LicenseFileValue, dataDir + '\license.lic', False) then
-          Log('license file copied: ' + LicenseFileValue + ' -> ' + dataDir + '\license.lic')
-        else
-          Log('LICENSE FILE COPY FAILED: ' + LicenseFileValue);
-      end else begin
-        Log('LICENSE FILE NOT FOUND: ' + LicenseFileValue + ' (skipped)');
-        LicenseFileValue := '';
-      end;
-    end;
   end;
 
   // 管理员账号写入数据库用户表：全新安装总是写入（交互安装由页面校验非空、
