@@ -1,0 +1,24 @@
+# 勤加软件WEB服务器运维管理平台 - 服务端配置
+server:
+  port: 8080
+  mode: release  # debug / release
+  # guacamole-server（guacd）地址，用于 H5 远程桌面（Windows RDP）。
+  # 部署示例（Docker）：docker run --name guacd -d -p 4822:4822 guacamole/guacd
+  # 默认 127.0.0.1:4822；置为 "-" 禁用 H5 远程桌面
+  guacd_addr: "127.0.0.1:4822"
+
+database:
+  driver: sqlite
+  dsn: ./data/gateway.db
+
+jwt:
+  # 上线前务必替换为随机强密钥（示例：openssl rand -hex 24）。
+  # 该密钥同时参与 SSH/SFTP 凭据的加密派生，更换后已保存的凭据密文需重新录入；
+  # Windows 安装版会在安装时自动生成随机密钥，无需手工修改。
+  secret: "CHANGE-ME-random-secret"
+  expire: 7200          # token 过期时间（秒）2小时
+  refresh_expire: 604800 # 刷新token过期时间（秒）7天
+
+# 默认管理员账号（admin / admin123）已内置在程序中，首次启动自动创建并写入数据库，
+# 不在配置文件中保存明文账号密码；安装版由安装程序直接写入数据库。
+# 如需修改密码，请登录平台后在「用户管理」中操作。

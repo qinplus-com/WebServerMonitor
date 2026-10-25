@@ -1,0 +1,24 @@
+# 构建产物
+backend/gateway
+backend/gateway.exe
+backend/gateway-demo-test.exe
+backend/tools/fingerprint/fingerprint
+backend/tools/fingerprint/fingerprint.exe
+frontend/node_modules/
+frontend/bgm.mp4.bak
+
+# 运行时数据（数据库 / 日志 / 凭据密钥）
+backend/data/
+*.log
+.aeskey
+
+# 商业版构建辅助（从商业仓库同步时防误提交）
+backend/license/keys_generated.go
+backend/build-with-license.ps1
+backend/build-with-license.py
+
+# IDE / 系统
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

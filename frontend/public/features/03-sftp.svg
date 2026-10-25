@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">
+<defs>
+<linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#eef1f6"/><stop offset="1" stop-color="#161616"/></linearGradient>
+<linearGradient id="lap" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4a83c9"/><stop offset="1" stop-color="#2c5d9a"/></linearGradient>
+<linearGradient id="cloudg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7fb2f0"/><stop offset="1" stop-color="#3f78bc"/></linearGradient>
+</defs>
+<rect width="400" height="300" fill="url(#bg)"/>
+<ellipse cx="200" cy="258" rx="160" ry="16" fill="#000" opacity=".28"/>
+<!-- laptop -->
+<rect x="40" y="118" width="130" height="86" rx="8" fill="url(#lap)"/>
+<rect x="50" y="128" width="110" height="66" rx="4" fill="#0d1c38"/>
+<rect x="60" y="138" width="60" height="6" rx="3" fill="#58a6ff" opacity=".7"/>
+<rect x="60" y="152" width="90" height="6" rx="3" fill="#3fb950" opacity=".55"/>
+<rect x="60" y="166" width="72" height="6" rx="3" fill="#58a6ff" opacity=".4"/>
+<path d="M30 210 h150 l10 16 H20 z" fill="#3568a8"/>
+<!-- folders floating -->
+<path d="M168 92 h30 l8 10 h34 v40 h-72 z" fill="#e0af68"/>
+<path d="M172 104 h62 v34 h-62 z" fill="#f0c58a"/>
+<path d="M70 86 h24 l6 8 h26 v30 h-56 z" fill="#d99a4d"/>
+<!-- transfer arrows -->
+<path d="M186 160 h64" stroke="#9ec5ff" stroke-width="4" stroke-linecap="round"/>
+<path d="M238 150 l14 10 -14 10" stroke="#9ec5ff" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M250 196 h-64" stroke="#9ec5ff" stroke-width="4" stroke-linecap="round"/>
+<path d="M198 186 l-14 10 14 10" stroke="#9ec5ff" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<!-- cloud -->
+<path d="M258 150 a20 20 0 0 1 20-20 a28 28 0 0 1 48 8 a18 18 0 0 1 -6 35 h-56 a20 20 0 0 1 -6 -23z" fill="url(#cloudg)"/>
+<path d="M284 142 v18 m-9 -9 h18" stroke="#e9f3ff" stroke-width="3.5" stroke-linecap="round"/>
+</svg>
