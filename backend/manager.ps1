@@ -251,7 +251,7 @@ function Do-Restore {
 #     数据目录存在 license.lic 时子进程会顺带激活并回传具体错误 ---
 function Get-LicInfo {
     $h = [ordered]@{ edition=''; max_servers=''; expire_at=''; issued_to='';
-                    is_trial='false'; days_left=''; servers=''; machine_hash=''; activate_error='' }
+                    is_trial='false'; days_left=''; servers=''; activate_error='' }
     try {
         $psi = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName = $exeFile
@@ -466,23 +466,6 @@ $btnImportLic = Make-Button '导入授权文件...' 463 24 135 33
 $btnImportLic.BackColor = $blue; $btnImportLic.ForeColor = [System.Drawing.Color]::White
 $btnImportLic.Add_Click({ Do-ImportLicense })
 $grpLic.Controls.Add($btnImportLic)
-
-# 指纹采集（打开同目录 fingerprint.exe，采集并导出本机指纹文件用于申请企业版授权）
-$btnFinger = Make-Button '指纹采集' 463 61 135 28
-$btnFinger.Add_Click({
-    $fpExe = Join-Path $scriptDir 'fingerprint.exe'
-    if (-not (Test-Path $fpExe)) {
-        [System.Windows.Forms.MessageBox]::Show("未找到指纹采集工具：`n$fpExe", '提示', 'OK', 'Warning') | Out-Null
-        return
-    }
-    try {
-        # 管理工具已提权，fingerprint.exe 继承管理员令牌直接启动，不触发 UAC
-        Start-Process -FilePath $fpExe -WorkingDirectory $scriptDir
-    } catch {
-        [System.Windows.Forms.MessageBox]::Show("启动指纹采集失败：`n$($_.Exception.Message)", '提示', 'OK', 'Error') | Out-Null
-    }
-})
-$grpLic.Controls.Add($btnFinger)
 
 # ---- 分组3：数据备份 ----
 $grpBak = New-Object System.Windows.Forms.GroupBox

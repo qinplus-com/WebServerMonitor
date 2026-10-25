@@ -2,8 +2,6 @@
 backend/gateway
 backend/gateway.exe
 backend/gateway-demo-test.exe
-backend/tools/fingerprint/fingerprint
-backend/tools/fingerprint/fingerprint.exe
 frontend/node_modules/
 frontend/bgm.mp4.bak
 

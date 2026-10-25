@@ -94,8 +94,7 @@ docker run --name guacd -d -p 4822:4822 guacamole/guacd
 │   ├── ssh/                SSH/SFTP 会话管理（含演示会话分流）
 │   ├── demo/               演示引擎（数据注入 + 命令模拟器）
 │   ├── monitor/            网址监控（状态码/延迟/证书链校验）
-│   ├── license/            授权模块（社区版经 -tags opensource 直通）
-│   ├── tools/fingerprint/  主机指纹工具源码（商业授权流程使用）
+│   ├── license/            授权模块（社区版经 -tags opensource 直通，无授权流程）
 │   ├── installer.iss       Windows 安装包脚本（Inno Setup 6，社区版）
 │   ├── portable/           便携版服务注册 / 管理脚本
 │   └── static/             前端构建产物（go:embed，随仓库提供以便免 Node 编译）
