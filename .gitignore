@@ -23,3 +23,14 @@ Thumbs.db
 
 # 本地构建/验证产物
 dist/
+
+# 商业版签名密钥与授权工具（严禁入库）
+backend/tools/keys/
+backend/tools/licgen/
+backend/tools/licgui/
+backend/tools/trial.txt
+backend/tools/sysam-any.txt*
+backend/fingerprint.exe
+
+# 临时测试产物
+backend/{%TEMP}/

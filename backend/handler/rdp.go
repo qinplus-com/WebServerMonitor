@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log"
 	"net"
-	"net/http"
 	"strconv"
 	"strings"
 	"sync"
@@ -184,29 +183,31 @@ func RDPSocket(c *gin.Context) {
 		h = 2160
 	}
 
-	// 取一次性凭证
-	v, ok := rdpTokens.LoadAndDelete(token)
-	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"msg": "连接凭证无效或已过期，请重新打开远程桌面"})
-		return
-	}
-	info := v.(rdpTokenInfo)
-	if time.Now().After(info.ExpireAt) {
-		c.JSON(http.StatusBadRequest, gin.H{"msg": "连接凭证已过期，请重新打开远程桌面"})
-		return
-	}
-	guacdAddr := config.Global.Server.GuacdAddr
-	if guacdAddr == "" || guacdAddr == "-" {
-		c.JSON(http.StatusBadRequest, gin.H{"msg": "网关未配置 guacd 服务器"})
-		return
-	}
-
+	// 先升级 WebSocket：后续校验失败时通过 guac error 指令下发真实原因，
+	// 避免前端把所有失败统一显示为「无法建立 WebSocket 通道」
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		log.Println("RDP WebSocket升级失败:", err)
 		return
 	}
 	defer conn.Close()
+
+	// 取一次性凭证
+	v, ok := rdpTokens.LoadAndDelete(token)
+	if !ok {
+		guacFail(conn, "连接凭证无效或已过期，请从服务器管理页重新打开远程桌面")
+		return
+	}
+	info := v.(rdpTokenInfo)
+	if time.Now().After(info.ExpireAt) {
+		guacFail(conn, "连接凭证已过期，请从服务器管理页重新打开远程桌面")
+		return
+	}
+	guacdAddr := config.Global.Server.GuacdAddr
+	if guacdAddr == "" || guacdAddr == "-" {
+		guacFail(conn, "网关未配置 guacd 服务器（config.yaml 的 guacd_addr），无法使用 H5 远程桌面")
+		return
+	}
 
 	// 连接 guacd
 	guacConn, err := net.DialTimeout("tcp", guacdAddr, 5*time.Second)
@@ -346,4 +347,10 @@ func guacHandshake(r *bufio.Reader, w *bufio.Writer, info rdpTokenInfo, width, h
 func guacSendError(conn *websocket.Conn, msg string) {
 	conn.WriteMessage(websocket.TextMessage, []byte(guacEncodeInstruction("error", msg, "SERVER_ERROR")))
 	conn.Close()
+}
+
+// guacFail 下发错误后短暂等待，确保前端在连接关闭前收到 error 指令（连接由 defer 关闭）
+func guacFail(conn *websocket.Conn, msg string) {
+	conn.WriteMessage(websocket.TextMessage, []byte(guacEncodeInstruction("error", msg, "SERVER_ERROR")))
+	time.Sleep(200 * time.Millisecond)
 }

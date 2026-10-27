@@ -111,7 +111,7 @@ type AlertSetting struct {
 // License 授权信息
 type License struct {
 	ID         uint      `gorm:"primaryKey" json:"id"`
-	Edition    string    `gorm:"size:32" json:"edition"`    // community | enterprise
+	Edition    string    `gorm:"size:32" json:"edition"`    // personal | sme | enterprise
 	MaxServers int       `json:"max_servers"`               // -1 不限
 	ExpireAt   time.Time `json:"expire_at"`                 // 试用/授权到期时间
 	IssuedTo   string    `gorm:"size:256" json:"issued_to"` // 被授权方名称

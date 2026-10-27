@@ -12,10 +12,7 @@ database:
   dsn: ./data/gateway.db
 
 jwt:
-  # 上线前务必替换为随机强密钥（示例：openssl rand -hex 24）。
-  # 该密钥同时参与 SSH/SFTP 凭据的加密派生，更换后已保存的凭据密文需重新录入；
-  # Windows 安装版会在安装时自动生成随机密钥，无需手工修改。
-  secret: "CHANGE-ME-random-secret"
+  secret: "qinjia-gateway-secret-2026"
   expire: 7200          # token 过期时间（秒）2小时
   refresh_expire: 604800 # 刷新token过期时间（秒）7天
 

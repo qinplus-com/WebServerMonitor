@@ -57,13 +57,6 @@ var downgradeNotice string
 // 这样用户激活企业版后，重启服务仍保持企业版（不依赖配置文件）
 func Init(cfgEdition string) {
 	downgradeNotice = ""
-	// 社区版（开源构建，-tags opensource）：跳过授权校验，
-	// 无服务器数量与使用期限限制，遵循 Apache-2.0 许可证分发
-	if communityEdition {
-		currentEdition = &Edition{Edition: "community", MaxServers: -1, DaysLeft: -1}
-		log.Println("[license] 社区版（开源构建）运行中，无服务器数量与使用期限限制")
-		return
-	}
 	var lic model.License
 	err := dao.DB.Order("id ASC").First(&lic).Error
 
@@ -173,6 +166,12 @@ func Init(cfgEdition string) {
 	}
 
 	// DB 无记录 → 按 config.yaml 的 edition 决定
+	if cfgEdition == "community" {
+		// 社区版（Apache-2.0 开源）：服务器数量与使用期限均不限制
+		currentEdition = &Edition{Edition: "community", MaxServers: -1, DaysLeft: -1}
+		log.Println("[license] 社区版（开源）运行中，服务器数量不限")
+		return
+	}
 	if cfgEdition == "personal" {
 		currentEdition = &Edition{Edition: "personal", MaxServers: 3, DaysLeft: -1}
 		log.Printf("[license] 个人版运行中，服务器限制 %d 台", currentEdition.MaxServers)
@@ -460,7 +459,7 @@ func editionName(ed string) string {
 	case "sme":
 		return "中小企业板"
 	case "community":
-		return "社区"
+		return "社区版（开源）"
 	default:
 		return "个人"
 	}
@@ -487,10 +486,6 @@ type LicenseInfo struct {
 //  1. 纯 Base64 授权码
 //  2. SYSAM-2.0 风格完整证书文本（自动提取 LICENSE_CODE_BEGIN/END 之间的内容）
 func Activate(licenseContent string) error {
-	// 社区版（开源构建）无需商业授权
-	if communityEdition {
-		return fmt.Errorf("社区版无需授权，遵循 Apache-2.0 许可证自由使用；商业授权（企业版 / 品牌定制）请联系软件供应商")
-	}
 	// 0. 保留原文（完整授权文件需做全文完整性校验），再提取授权码块
 	original := licenseContent
 

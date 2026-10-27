@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿# ============================================================
+﻿# ============================================================
 # 平台管理工具
 # 功能：系统服务 启停/重启、运行状态、数据备份/恢复（自定义备份目录）
 # 适用：Windows 10 / Server 2016 及以上，PowerShell 5.1+
@@ -160,7 +160,7 @@ function Start-Svc {
     if ((Get-SvcStatus) -ne 'Running') {
         $logHint = Join-Path $dataDir 'logs'
         [System.Windows.Forms.MessageBox]::Show(
-            "服务启动失败或已退出。`n`n$out`n`n详细原因请查看日志目录：`n$logHint`n（gateway-日期.log）`n`n常见原因：端口被占用、数据目录权限不足。",
+            "服务启动失败或已退出。`n`n$out`n`n详细原因请查看日志目录：`n$logHint`n（gateway-日期.log）`n`n常见原因：数据目录复制自其他机器导致授权校验失败（个人版限 3 台）。",
             '启动失败', 'OK', 'Error') | Out-Null
     }
 }
@@ -251,7 +251,7 @@ function Do-Restore {
 #     数据目录存在 license.lic 时子进程会顺带激活并回传具体错误 ---
 function Get-LicInfo {
     $h = [ordered]@{ edition=''; max_servers=''; expire_at=''; issued_to='';
-                    is_trial='false'; days_left=''; servers=''; activate_error='' }
+                    is_trial='false'; days_left=''; servers=''; machine_hash=''; activate_error='' }
     try {
         $psi = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName = $exeFile
@@ -287,9 +287,12 @@ function Refresh-License {
             $lblLicVer.Text = '当前授权：企业版正式授权（不限服务器数量）'
             $lblLicVer.ForeColor = $greenColor
         }
-    } else {
-        $lblLicVer.Text = '当前授权：社区版（无服务器数量与使用期限限制）'
+    } elseif ($li.edition -eq 'sme') {
+        $lblLicVer.Text = "当前授权：中小企业板正式授权（限 10 台，已有 $($li.servers) 台）"
         $lblLicVer.ForeColor = $greenColor
+    } else {
+        $lblLicVer.Text = "当前授权：个人版（限 3 台，已有 $($li.servers) 台）"
+        $lblLicVer.ForeColor = $darkColor
     }
     if ($li.days_left -eq '-1') {
         $lblLicExpire.Text = '有效期：永久授权，无使用期限限制'
@@ -302,7 +305,7 @@ function Refresh-License {
     if ($li.issued_to) {
         $lblLicTo.Text = "授权对象：$($li.issued_to)"
     } else {
-        $lblLicTo.Text = '授权对象：—（社区版）'
+        $lblLicTo.Text = '授权对象：—（个人版 / 本机试用）'
     }
     $lblLicTo.ForeColor = $darkColor
     return $li
@@ -463,6 +466,23 @@ $btnImportLic = Make-Button '导入授权文件...' 463 24 135 33
 $btnImportLic.BackColor = $blue; $btnImportLic.ForeColor = [System.Drawing.Color]::White
 $btnImportLic.Add_Click({ Do-ImportLicense })
 $grpLic.Controls.Add($btnImportLic)
+
+# 指纹采集（打开同目录 fingerprint.exe，采集并导出本机指纹文件用于申请企业版授权）
+$btnFinger = Make-Button '指纹采集' 463 61 135 28
+$btnFinger.Add_Click({
+    $fpExe = Join-Path $scriptDir 'fingerprint.exe'
+    if (-not (Test-Path $fpExe)) {
+        [System.Windows.Forms.MessageBox]::Show("未找到指纹采集工具：`n$fpExe", '提示', 'OK', 'Warning') | Out-Null
+        return
+    }
+    try {
+        # 管理工具已提权，fingerprint.exe 继承管理员令牌直接启动，不触发 UAC
+        Start-Process -FilePath $fpExe -WorkingDirectory $scriptDir
+    } catch {
+        [System.Windows.Forms.MessageBox]::Show("启动指纹采集失败：`n$($_.Exception.Message)", '提示', 'OK', 'Error') | Out-Null
+    }
+})
+$grpLic.Controls.Add($btnFinger)
 
 # ---- 分组3：数据备份 ----
 $grpBak = New-Object System.Windows.Forms.GroupBox

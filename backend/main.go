@@ -143,6 +143,7 @@ func main() {
 		var srvCount int64
 		dao.DB.Table("servers").Count(&srvCount)
 		fmt.Printf("servers=%d\n", srvCount)
+		fmt.Printf("machine_hash=%s\n", license.GetMachineHash())
 		fmt.Printf("activate_error=%s\n", actErr)
 		return
 	}
