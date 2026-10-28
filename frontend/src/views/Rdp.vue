@@ -1,5 +1,5 @@
 <template>
-  <div class="rdp-page" :class="{ 'in-fs': isFullscreen }">
+  <div class="rdp-page" :class="{ 'in-fs': isFullscreen }" @dragover.prevent @drop.prevent="onPageDrop">
     <!-- 顶部悬浮工具条：3 秒无鼠标活动自动收起，移动鼠标唤醒 -->
     <div class="rdp-toolbar" :class="{ hide: !toolbarVisible }" @mouseenter="toolbarHover = true" @mouseleave="toolbarHover = false">
       <span class="dot" :class="statusClass"></span>
@@ -308,6 +308,17 @@ function startSession(token, seamless) {
       navigator.clipboard.writeText(text).catch(() => {})
     }
   }
+  // 远端复制的文件（MS-RDPECLIP FileGroupDescriptorW）-> 浏览器下载
+  newClient.onfile = (stream, mimetype, name) => {
+    if (isVnc) return
+    const reader = new Guacamole.BlobReader(stream, mimetype)
+    reader.onend = () => {
+      clipFileBatch.push({ name, blob: reader.getBlob() })
+      clearTimeout(clipBatchTimer)
+      // 同一次远端复制的多个文件连续到达，静默 500ms 视为一批
+      clipBatchTimer = setTimeout(flushClipFiles, 500)
+    }
+  }
 
   const el = newClient.getDisplay().getElement()
   // 远端分辨率就绪/变化 -> seamless 时完成画面替换，随后贴合容器
@@ -507,6 +518,43 @@ async function downloadTransfer(f) {
     URL.revokeObjectURL(url)
   } catch (e) {
     ElMessage.error(e.message || '下载失败')
+  }
+}
+
+// ===== 远端剪贴板文件下载（MS-RDPECLIP） =====
+let clipFileBatch = []
+let clipBatchTimer = null
+
+function flushClipFiles() {
+  const files = clipFileBatch
+  clipFileBatch = []
+  if (!files.length) return
+  const list = files.map(f => f.name).join('\n')
+  ElMessageBox.confirm(
+    `远程桌面复制了 ${files.length} 个文件到剪贴板：\n${list}\n\n是否下载到本地？`,
+    '远程剪贴板文件',
+    { confirmButtonText: '下载到本地', cancelButtonText: '忽略', customClass: 'msgbox-pre' }
+  ).then(() => {
+    for (const f of files) {
+      const url = URL.createObjectURL(f.blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = (f.name || 'clipboard-file').replace(/[\\/:*?"<>|]/g, '_')
+      a.click()
+      setTimeout(() => URL.revokeObjectURL(url), 5000)
+    }
+  }).catch(() => {})
+}
+
+// 页面级拖拽：本地文件拖入桌面页 = 上传到远程（经共享文件夹中转）
+function onPageDrop(e) {
+  if (isVnc) return
+  const dt = e.dataTransfer
+  if (dt && dt.files && dt.files.length) {
+    filesPanel.value = true
+    toolbarHover.value = true
+    loadTransferFiles()
+    uploadTransferFiles(dt.files)
   }
 }
 
