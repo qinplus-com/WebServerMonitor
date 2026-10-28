@@ -59,7 +59,7 @@ var Global *Config
 // DefaultConfig 内置默认配置（配置文件缺失时使用）
 func DefaultConfig() *Config {
 	return &Config{
-		Server:   ServerConfig{Port: 8080, Mode: "release", GuacdAddr: "127.0.0.1:4822"},
+		Server:   ServerConfig{Port: 8080, Mode: "release", GuacdAddr: "-"},
 		Database: DatabaseConfig{Driver: "sqlite", DSN: "gateway.db"},
 		JWT:      JWTConfig{Secret: "qinjiagateway-default-secret", Expire: 7200, RefreshExpire: 604800},
 		Admin:    AdminConfig{Username: "admin", Password: "admin123"},

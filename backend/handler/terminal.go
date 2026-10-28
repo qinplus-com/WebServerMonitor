@@ -19,6 +19,10 @@ import (
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024 * 4,
+	// guacamole-common-js 的 WebSocketTunnel 以 "guacamole" 为子协议连接，
+	// RFC 6455 要求服务端回显所选子协议，否则浏览器强制断开握手。
+	// 客户端未请求子协议时（如 SSH 终端）不会受影响。
+	Subprotocols: []string{"guacamole"},
 	CheckOrigin: func(r *http.Request) bool {
 		return true
 	},

@@ -37,6 +37,16 @@ func (w *dateFileWriter) Write(p []byte) (int, error) {
 	return w.f.Write(p)
 }
 
+// stderrSafe 包装 os.Stderr：服务模式下 stderr 是无效句柄，写入会报错；
+// io.MultiWriter 遇到错误会短路导致后续文件不落盘，这里吞掉 stderr 的写错误
+// （控制台模式下仍正常输出，服务模式下静默丢弃）。
+type stderrSafe struct{}
+
+func (stderrSafe) Write(p []byte) (int, error) {
+	n, _ := os.Stderr.Write(p)
+	return n, nil
+}
+
 // initFileLog 将进程日志落盘到 <数据目录>\logs\（按天分割）。
 // 服务模式下 stderr 不可见，落盘是排障（如授权校验失败、启动超限）的唯一途径；
 // 文件打不开时静默回退 stderr，不阻塞启动。同时接管 GIN 请求日志。
@@ -46,7 +56,7 @@ func initFileLog(dataDir string) {
 		return
 	}
 	w := &dateFileWriter{dir: dir}
-	mw := io.MultiWriter(os.Stderr, w)
+	mw := io.MultiWriter(w, stderrSafe{})
 	log.SetOutput(mw)
 	gin.DefaultWriter = mw
 	gin.DefaultErrorWriter = mw

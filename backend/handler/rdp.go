@@ -3,8 +3,10 @@ package handler
 import (
 	"bufio"
 	"errors"
+	"io"
 	"log"
 	"net"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -141,11 +143,8 @@ func RDPToken(c *gin.Context) {
 			return
 		}
 	}
-	// guacd 未配置（config 中置 "-"）则明确提示
-	if config.Global == nil || config.Global.Server.GuacdAddr == "-" {
-		utils.Fail(c, "网关未配置 guacd 服务器，无法使用 H5 远程桌面（见 config.yaml 的 guacd_addr）")
-		return
-	}
+	// guacd 未配置（空或 "-"）时由内置 RDP 引擎（rdpd）接管，无需拦截
+
 	// RDP 需密码认证（NLA）
 	plain, ok := utils.DecryptEx(server.Password)
 	if !ok || plain == "" {
@@ -168,12 +167,20 @@ func RDPToken(c *gin.Context) {
 
 // RDPSocket H5 远程桌面 WebSocket：/ws/rdp?token=&w=&h=
 func RDPSocket(c *gin.Context) {
-	token := c.Query("token")
-	w, h := 1024, 768
-	if v, err := strconv.Atoi(c.Query("w")); err == nil && v > 0 {
+	// guacamole WebSocketTunnel 建连时会无条件追加 "?<data>"（前端 client.connect()
+	// 未传 data 时产生 "?undefined" 垃圾尾巴，如 "&h=1080?undefined"），
+	// 截掉第二个 "?" 及之后内容再解析，避免尺寸参数解析失败回落默认值 768。
+	rawQuery := c.Request.URL.RawQuery
+	if i := strings.Index(rawQuery, "?"); i >= 0 {
+		rawQuery = rawQuery[:i]
+	}
+	q, _ := url.ParseQuery(rawQuery)
+	token := q.Get("token")
+	w, h := 1920, 1080
+	if v, err := strconv.Atoi(q.Get("w")); err == nil && v > 0 {
 		w = v
 	}
-	if v, err := strconv.Atoi(c.Query("h")); err == nil && v > 0 {
+	if v, err := strconv.Atoi(q.Get("h")); err == nil && v > 0 {
 		h = v
 	}
 	if w > 3840 {
@@ -205,7 +212,9 @@ func RDPSocket(c *gin.Context) {
 	}
 	guacdAddr := config.Global.Server.GuacdAddr
 	if guacdAddr == "" || guacdAddr == "-" {
-		guacFail(conn, "网关未配置 guacd 服务器（config.yaml 的 guacd_addr），无法使用 H5 远程桌面")
+		// 未配置 guacd：使用内置 RDP 引擎（rdpd）
+		log.Printf("RDP 内置引擎：server=%d 前端请求 %dx%d", info.ServerID, w, h)
+		builtinRDPSession(conn, info, w, h)
 		return
 	}
 
@@ -220,7 +229,7 @@ func RDPSocket(c *gin.Context) {
 	guacWriter := bufio.NewWriter(guacConn)
 
 	// 握手：select -> 收 args -> 发 size/image/audio/video + args 值 -> 收 ready
-	if err := guacHandshake(guacReader, guacWriter, info, w, h); err != nil {
+	if err := guacHandshake(guacReader, guacWriter, guacWriter, info, w, h); err != nil {
 		guacSendError(conn, "远程桌面连接失败："+err.Error())
 		return
 	}
@@ -230,13 +239,12 @@ func RDPSocket(c *gin.Context) {
 	// ===== 握手完成，进入纯双向转发 =====
 	done := make(chan struct{}, 2)
 
-	// guacd -> 浏览器（从 bufio.Reader 读：先排空握手表内残余，再落到底层连接）
+	// guacd -> 浏览器（按指令边界重组后整条发送，原因同 rdp_builtin.go）
 	go func() {
-		buf := make([]byte, 16*1024)
 		for {
-			n, err := guacReader.Read(buf)
-			if n > 0 {
-				if werr := conn.WriteMessage(websocket.TextMessage, buf[:n]); werr != nil {
+			line, err := guacReader.ReadBytes(';')
+			if len(line) > 0 {
+				if werr := conn.WriteMessage(websocket.TextMessage, line); werr != nil {
 					break
 				}
 			}
@@ -265,13 +273,24 @@ func RDPSocket(c *gin.Context) {
 	log.Printf("H5 远程桌面已断开：server=%d user=%d", info.ServerID, info.UserID)
 }
 
-// guacHandshake 与 guacd 完成连接握手
-func guacHandshake(r *bufio.Reader, w *bufio.Writer, info rdpTokenInfo, width, height int) error {
-	// 1) select rdp
-	if _, err := w.WriteString(guacEncodeInstruction("select", "rdp")); err != nil {
+// guacHandshake 与 guacd（或内置 rdpd）完成连接握手。
+// w 为底层写出器；flusher 非 nil 时在关键节点刷缓冲（TCP 场景）。
+func guacHandshake(r *bufio.Reader, w io.Writer, flusher interface{ Flush() error }, info rdpTokenInfo, width, height int) error {
+	writeInstr := func(s string) error {
+		_, err := io.WriteString(w, s)
 		return err
 	}
-	if err := w.Flush(); err != nil {
+	flush := func() error {
+		if flusher != nil {
+			return flusher.Flush()
+		}
+		return nil
+	}
+	// 1) select rdp
+	if err := writeInstr(guacEncodeInstruction("select", "rdp")); err != nil {
+		return err
+	}
+	if err := flush(); err != nil {
 		return err
 	}
 	// 2) 收 args（参数名列表）
@@ -303,22 +322,18 @@ func guacHandshake(r *bufio.Reader, w *bufio.Writer, info rdpTokenInfo, width, h
 	}
 
 	// 4) size / image / audio / video / args
-	if _, err := w.WriteString(guacEncodeInstruction("size", strconv.Itoa(width), strconv.Itoa(height))); err != nil {
-		return err
+	for _, s := range []string{
+		guacEncodeInstruction("size", strconv.Itoa(width), strconv.Itoa(height)),
+		guacEncodeInstruction("image", "image/png", "image/jpeg"),
+		guacEncodeInstruction("audio", "-"),
+		guacEncodeInstruction("video", "-"),
+		guacEncodeInstruction(argsValues...),
+	} {
+		if err := writeInstr(s); err != nil {
+			return err
+		}
 	}
-	if _, err := w.WriteString(guacEncodeInstruction("image", "image/png", "image/jpeg")); err != nil {
-		return err
-	}
-	if _, err := w.WriteString(guacEncodeInstruction("audio", "-")); err != nil {
-		return err
-	}
-	if _, err := w.WriteString(guacEncodeInstruction("video", "-")); err != nil {
-		return err
-	}
-	if _, err := w.WriteString(guacEncodeInstruction(argsValues...)); err != nil {
-		return err
-	}
-	if err := w.Flush(); err != nil {
+	if err := flush(); err != nil {
 		return err
 	}
 
