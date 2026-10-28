@@ -1,7 +1,7 @@
 <template>
   <div class="sftp-page">
     <div class="toolbar">
-      <el-select v-model="selectedServer" placeholder="选择服务器" filterable style="width: 260px" @change="loadList">
+      <el-select v-model="selectedServer" placeholder="选择服务器" filterable style="width: 260px" @change="onServerChange">
         <el-option v-for="s in servers" :key="s.id" :label="`${s.name} (${s.ip})`" :value="s.id" />
       </el-select>
       <el-button @click="goBack" :disabled="!canGoBack"><el-icon><ArrowLeft /></el-icon> 上级目录</el-button>
@@ -125,9 +125,43 @@ onMounted(async () => {
   servers.value = res.data
   if (route.query.server_id) {
     selectedServer.value = Number(route.query.server_id)
+    warnIfPublic(servers.value.find(s => s.id === selectedServer.value))
     loadList()
   }
 })
+
+// ===== 公网 SMB 安全提示 =====
+// 公网 IP 判定：私网段（10/172.16-31/192.168）、回环、链路本地、演示地址均不算公网
+function isPublicIp(ip) {
+  if (!ip || ip.startsWith('demo://')) return false
+  if (/^(10\.|192\.168\.|127\.|169\.254\.|0\.|::1|localhost|fe80:|fc|fd)/i.test(ip)) return false
+  const m = ip.match(/^172\.(\d+)\./)
+  if (m && Number(m[1]) >= 16 && Number(m[1]) <= 31) return false
+  return true
+}
+
+// 检测到走公网 IP 的 Windows 共享访问时弹出安全建议（每台服务器仅提示一次）
+function warnIfPublic(server) {
+  if (!server || server.os_type !== 'windows' || !isPublicIp(server.ip)) return
+  const key = 'smb-pub-warn-' + server.id
+  if (localStorage.getItem(key)) return
+  localStorage.setItem(key, '1')
+  ElMessageBox.alert(
+    '该服务器为公网地址，文件管理将通过 SMB 跨公网传输，请注意安全：\n\n' +
+    '1. 建议在云安全组/防火墙只对平台服务器的出口 IP 白名单放行 SMB 端口，避免 445 端口被扫描爆破\n' +
+    '2. 共享文件夹只给专用账号授权读写，不要使用 Everyone\n' +
+    '3. 该账号请使用强密码\n' +
+    '4. 部分运营商/云厂商会拦截公网 445 入站，可在目标机做端口映射，并在服务器编辑中填自定义 SMB 端口\n' +
+    '5. 更稳妥的方案：平台与目标机之间走 VPN/内网穿透，SMB 流量不暴露公网',
+    '公网 SMB 安全提示',
+    { confirmButtonText: '我已知晓', customClass: 'msgbox-pre' }
+  ).catch(() => {})
+}
+
+function onServerChange(id) {
+  warnIfPublic(servers.value.find(s => s.id === id))
+  loadList()
+}
 
 async function loadList() {
   if (!selectedServer.value) return
