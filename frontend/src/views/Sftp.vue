@@ -133,9 +133,16 @@ async function loadList() {
   if (!selectedServer.value) return
   loading.value = true
   try {
-    const res = await sftpApi.list({ server_id: selectedServer.value, path: currentPath.value })
+    // silent：错误不走全局 toast，改用对话框完整展示解决方案（后端 msg 自带排查步骤）
+    const res = await sftpApi.list({ server_id: selectedServer.value, path: currentPath.value }, { silent: true })
     files.value = res.data.files
     canGoBack.value = currentPath.value !== '/'
+  } catch (e) {
+    files.value = []
+    ElMessageBox.alert(e.message || '读取目录失败', '文件管理', {
+      confirmButtonText: '知道了',
+      customClass: 'msgbox-pre'
+    }).catch(() => {})
   } finally { loading.value = false }
 }
 

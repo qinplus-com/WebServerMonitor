@@ -4,7 +4,7 @@
     <div class="rdp-toolbar" :class="{ hide: !toolbarVisible }" @mouseenter="toolbarHover = true" @mouseleave="toolbarHover = false">
       <span class="dot" :class="statusClass"></span>
       <span class="t-status">{{ statusText }}</span>
-      <el-select v-model="resSel" size="small" class="t-res-sel" @change="onResChange" @visible-change="resSelectOpen = $event" @keydown.stop>
+      <el-select v-if="!isVnc" v-model="resSel" size="small" class="t-res-sel" @change="onResChange" @visible-change="resSelectOpen = $event" @keydown.stop>
         <el-option value="auto" label="自动" />
         <el-option v-for="o in RES_OPTIONS" :key="o" :value="o" :label="o" />
       </el-select>
@@ -40,7 +40,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import Guacamole from 'guacamole-common-js'
 import { rdpApi } from '../api'
 
@@ -66,6 +66,8 @@ if (!Guacamole.__rectPositionPatched) {
 
 const route = useRoute()
 const router = useRouter()
+// VNC 会话（Linux 服务器）：画布跟随远端桌面尺寸，不支持分辨率切换重连
+const isVnc = route.query.proto === 'vnc'
 const displayEl = ref(null)
 const status = ref('connecting') // connecting / connected / closed
 const mask = ref('connecting') // connecting / rescale / 错误文案 / ''（无遮罩）
@@ -116,6 +118,27 @@ watch(mask, (v) => {
     scheduleToolbarHide()
   }
 })
+
+// 连接失败：弹出带解决方案的对话框（不再是转瞬即逝的 toast）。
+// Linux VNC 与 Windows RDP 的排查步骤不同，按协议分别给出。
+function showConnectHelp(msg) {
+  const tips = isVnc
+    ? [
+        '1. 目标机安装并启动 VNC 服务：CentOS 执行 yum install tigervnc-server -y，运行 vncpasswd 设置密码（与平台登录密码一致）后执行 vncserver :1 启动',
+        '2. 防火墙放行 VNC 端口：firewall-cmd --add-port=5901/tcp --permanent && firewall-cmd --reload',
+        '3. 确认服务器编辑中的 VNC 端口与目标机一致（:1 对应 5901，:2 对应 5902）',
+        '4. 详细部署步骤见平台文档《Linux远程桌面(VNC).md》'
+      ]
+    : [
+        '1. 确认目标机已启用远程桌面（系统属性 → 远程 → 允许远程连接到此计算机）',
+        '2. 目标机防火墙放行 3389 端口',
+        '3. 确认登录账号密码正确（账号需有远程桌面权限）'
+      ]
+  ElMessageBox.alert(msg + '\n\n' + tips.join('\n'), '远程桌面连接失败', {
+    confirmButtonText: '知道了',
+    customClass: 'msgbox-pre'
+  }).catch(() => {})
+}
 
 // 画面等比缩放填满容器（允许放大，避免比例失配时出现大片黑边）；
 // 实现见 fitSize()：对 display 层整体 transform 缩放 + 绝对定位居中，
@@ -244,11 +267,10 @@ function startSession(token, seamless) {
       ElMessage.error('分辨率适配失败，保持当前画面')
       return
     }
+    showConnectHelp(msg)
     if (status.value !== 'connected') {
       mask.value = msg
       status.value = 'closed'
-    } else {
-      ElMessage.error(msg)
     }
   }
   // 远端剪贴板 -> 本地
@@ -309,6 +331,7 @@ function startSession(token, seamless) {
 // 非全屏固定 1920×1080，全屏用客户机屏幕分辨率；窗口拖动不改变会话分辨率，
 // 仅 fitSize 等比缩放显示。目标尺寸与当前会话差异不足 80px 时不重连。
 function requestRescale() {
+  if (isVnc) return // VNC 画布跟随远端桌面，无需重连适配
   if (reconnecting) {
     rescalePending = true
     return

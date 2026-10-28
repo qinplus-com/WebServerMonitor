@@ -35,6 +35,7 @@ type rdpTokenInfo struct {
 	UserID   uint
 	IP       string
 	Port     int
+	Proto    string // rdp / vnc
 	Username string
 	Password string
 	ExpireAt time.Time
@@ -145,11 +146,26 @@ func RDPToken(c *gin.Context) {
 	}
 	// guacd 未配置（空或 "-"）时由内置 RDP 引擎（rdpd）接管，无需拦截
 
-	// RDP 需密码认证（NLA）
-	plain, ok := utils.DecryptEx(server.Password)
-	if !ok || plain == "" {
-		utils.Fail(c, "该服务器未配置密码，无法使用远程桌面（RDP 需密码认证）")
-		return
+	// 协议与端口：Windows 走 RDP；Linux 走 VNC（需在编辑中开启 VNC 端口）
+	proto := "rdp"
+	port := server.Port
+	if server.OsType != "windows" {
+		proto = "vnc"
+		if server.VncPort <= 0 {
+			utils.Fail(c, "该服务器未开启远程桌面：请在编辑中配置 VNC 端口（如 5901）")
+			return
+		}
+		port = server.VncPort
+	}
+	// RDP 需密码认证（NLA）；VNC 允许空密码（目标机未设 vncpasswd 时走 None 认证）
+	var plain string
+	if proto == "rdp" {
+		p, ok := utils.DecryptEx(server.Password)
+		if !ok || p == "" {
+			utils.Fail(c, "该服务器未配置密码，无法使用远程桌面（RDP 需密码认证）")
+			return
+		}
+		plain = p
 	}
 
 	token := uuid.New().String()
@@ -157,12 +173,13 @@ func RDPToken(c *gin.Context) {
 		ServerID: server.ID,
 		UserID:   userID.(uint),
 		IP:       server.IP,
-		Port:     server.Port,
+		Port:     port,
+		Proto:    proto,
 		Username: server.Username,
 		Password: plain,
 		ExpireAt: time.Now().Add(60 * time.Second),
 	})
-	utils.Success(c, gin.H{"token": token})
+	utils.Success(c, gin.H{"token": token, "proto": proto})
 }
 
 // RDPSocket H5 远程桌面 WebSocket：/ws/rdp?token=&w=&h=
@@ -286,8 +303,12 @@ func guacHandshake(r *bufio.Reader, w io.Writer, flusher interface{ Flush() erro
 		}
 		return nil
 	}
-	// 1) select rdp
-	if err := writeInstr(guacEncodeInstruction("select", "rdp")); err != nil {
+	proto := info.Proto
+	if proto == "" {
+		proto = "rdp"
+	}
+	// 1) select 协议（rdp / vnc）
+	if err := writeInstr(guacEncodeInstruction("select", proto)); err != nil {
 		return err
 	}
 	if err := flush(); err != nil {
@@ -304,16 +325,22 @@ func guacHandshake(r *bufio.Reader, w io.Writer, flusher interface{ Flush() erro
 	}
 	names := parts[1:]
 
-	// 3) 按参数名回填值（未知参数留空，guacd 忽略空值）
+	// 3) 按参数名回填值（未知参数留空，guacd 忽略空值）。
+	// VNC 仅用 hostname/port/password（username/security 置空，rdpd 与外置 guacd 均忽略）
 	values := map[string]string{
 		"hostname":      info.IP,
 		"port":          strconv.Itoa(info.Port),
-		"username":      info.Username,
 		"password":      info.Password,
-		"security":      "nla",
+		"username":      "",
+		"security":      "",
 		"ignore-cert":   "true",
-		"resize-method": "display-update",
+		"resize-method": "",
 		"client-name":   "QinJiaGateway",
+	}
+	if proto == "rdp" {
+		values["username"] = info.Username
+		values["security"] = "nla"
+		values["resize-method"] = "display-update"
 	}
 	argsValues := make([]string, 0, len(names)+1)
 	argsValues = append(argsValues, "args")

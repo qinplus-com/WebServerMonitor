@@ -31,10 +31,10 @@ export const terminalApi = {
 }
 
 export const sftpApi = {
-  list: (params) => request.get('/sftp/list', { params }),
-  operate: (data) => request.post('/sftp/operate', data),
-  upload: (formData) => request.post('/sftp/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
-  download: (params) => request.get('/sftp/download', { params, responseType: 'blob' })
+  list: (params, config) => request.get('/sftp/list', { params, ...config }),
+  operate: (data, config) => request.post('/sftp/operate', data, config),
+  upload: (formData, config) => request.post('/sftp/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' }, ...config }),
+  download: (params, config) => request.get('/sftp/download', { params, responseType: 'blob', ...config })
 }
 
 export const userApi = {

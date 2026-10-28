@@ -25,18 +25,18 @@
           <template #default="{ row }"><el-tag :type="row.status ? 'success' : 'info'" size="small">{{ row.status ? '在线' : '离线' }}</el-tag></template>
         </el-table-column>
         <el-table-column prop="remark" label="备注" min-width="140" show-overflow-tooltip />
-        <el-table-column label="操作" :width="isAdmin ? 370 : 260" fixed="right">
+        <el-table-column label="操作" :width="isAdmin ? 420 : 290" fixed="right">
           <template #default="{ row }">
             <div class="op-cell">
-              <el-button link type="primary" @click="openTerminal(row)"><el-icon><Monitor /></el-icon> 终端</el-button>
+              <el-button v-if="!isWin(row)" link type="primary" @click="openTerminal(row)"><el-icon><Monitor /></el-icon> 终端</el-button>
               <el-button link type="warning" @click="openSftp(row)"><el-icon><Folder /></el-icon> 文件</el-button>
-              <el-dropdown v-if="isWin(row)" trigger="click" @command="cmd => openRemote(cmd, row)">
+              <!-- Windows 始终可远程桌面；Linux 需已配置 VNC 端口才显示入口 -->
+              <el-dropdown v-if="isWin(row) || row.vnc_port > 0" trigger="click" @command="cmd => openRemote(cmd, row)">
                 <el-button link type="danger" class="rdp-btn"><el-icon><Connection /></el-icon> 远程桌面<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button>
                 <template #dropdown>
                   <el-dropdown-menu>
-                    <el-dropdown-item command="local"><el-icon><Launch /></el-icon> 本地RDP（mstsc）</el-dropdown-item>
-                    <el-dropdown-item command="h5"><el-icon><Monitor /></el-icon> H5 浏览器桌面</el-dropdown-item>
-                    <el-dropdown-item v-if="isAdmin" command="copy" divided><el-icon><Key /></el-icon> 复制登录密码</el-dropdown-item>
+                    <el-dropdown-item v-if="isWin(row)" command="local"><el-icon><Launch /></el-icon> 本地RDP（mstsc）</el-dropdown-item>
+                    <el-dropdown-item command="h5"><el-icon><Monitor /></el-icon> {{ isWin(row) ? 'H5 浏览器桌面' : 'H5 浏览器桌面（VNC）' }}</el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>
@@ -60,6 +60,24 @@
         </el-form-item>
         <el-form-item label="IP"><el-input v-model="editForm.ip" /></el-form-item>
         <el-form-item label="端口"><el-input-number v-model="editForm.port" :min="1" :max="65535" /></el-form-item>
+        <el-form-item v-if="editForm.os_type === 'windows'" label="文件共享名">
+          <div class="vnc-editor">
+            <el-input v-model="editForm.smb_share" placeholder="目标机的共享文件夹名称，如 share" style="width: 240px" />
+            <span class="vnc-label">SMB 端口</span>
+            <el-input-number v-model="editForm.smb_port" :min="0" :max="65535" controls-position="right" style="width: 120px" placeholder="445" />
+          </div>
+          <div class="urls-tip"><span>Windows 文件管理通过 SMB 共享文件夹：先在目标机右键文件夹 → 属性 → 共享，给登录账号授予读写权限，再填共享名称。端口默认 445；跨公网访问时需在防火墙/云安全组放行（建议仅对平台服务器 IP 白名单开放），端口映射场景填映射后的公网端口</span></div>
+        </el-form-item>
+        <el-form-item v-if="editForm.os_type === 'linux'" label="远程桌面">
+          <div class="vnc-editor">
+            <el-switch :model-value="vncOn" @update:model-value="setVncOn" />
+            <template v-if="vncOn">
+              <span class="vnc-label">VNC 端口</span>
+              <el-input-number v-model="editForm.vnc_port" :min="1" :max="65535" controls-position="right" style="width: 120px" />
+            </template>
+          </div>
+          <div v-if="vncOn" class="urls-tip"><span>目标机需运行 VNC 服务（如 tigervnc :1 → 端口 5901），认证密码取服务器登录密码，部署步骤见《Linux远程桌面(VNC).md》文档</span></div>
+        </el-form-item>
         <el-form-item label="登录账号"><el-input v-model="editForm.username" /></el-form-item>
         <el-form-item label="认证方式"><el-radio-group v-model="editForm.auth_type"><el-radio value="password">密码</el-radio><el-radio value="key">密钥</el-radio></el-radio-group></el-form-item>
         <el-form-item v-if="editForm.auth_type === 'password'" label="密码"><el-input v-model="editForm.password" type="password" show-password /></el-form-item>
@@ -133,10 +151,16 @@ const loading = ref(false)
 const dialogVisible = ref(false)
 const groupVisible = ref(false)
 const newGroupName = ref('')
-const editForm = reactive({ id: null, name: '', ip: '', port: 22, os_type: 'linux', username: '', auth_type: 'password', password: '', private_key: '', group_id: null, remark: '' })
+const editForm = reactive({ id: null, name: '', ip: '', port: 22, os_type: 'linux', vnc_port: 0, smb_share: '', smb_port: 0, username: '', auth_type: 'password', password: '', private_key: '', group_id: null, remark: '' })
 
 // 是否 Windows 服务器（存量数据 os_type 为空按 Linux 处理）
 function isWin(row) { return row.os_type === 'windows' }
+// Linux VNC 远程桌面开关（vnc_port 0=关，开启默认 5901）
+const vncOn = computed(() => editForm.vnc_port > 0)
+function setVncOn(v) {
+  if (v && !editForm.vnc_port) editForm.vnc_port = 5901
+  if (!v) editForm.vnc_port = 0
+}
 // 类型切换时，端口处于另一类型的默认值则联动（22 ↔ 3389），用户自定义端口不动
 function onTypeChange(os) {
   const d = { linux: 22, windows: 3389 }
@@ -193,7 +217,7 @@ function syncWwwProtocol(idx) {
   if (wwwRow) wwwRow.protocol = row.protocol
 }
 async function openEdit(row) {
-  Object.assign(editForm, { id: null, name: '', ip: '', port: 22, os_type: 'linux', username: '', auth_type: 'password', password: '', private_key: '', group_id: null, remark: '' })
+  Object.assign(editForm, { id: null, name: '', ip: '', port: 22, os_type: 'linux', vnc_port: 0, smb_share: '', smb_port: 0, username: '', auth_type: 'password', password: '', private_key: '', group_id: null, remark: '' })
   editUrls.value = []
   editGrantUserIds.value = []
   // 加载全部用户（用于授权选择）
@@ -207,6 +231,9 @@ async function openEdit(row) {
     Object.assign(editForm, row)
     // 存量数据 os_type 为空按 Linux
     if (editForm.os_type !== 'windows') editForm.os_type = 'linux'
+    editForm.vnc_port = row.vnc_port || 0
+    editForm.smb_share = row.smb_share || ''
+    editForm.smb_port = row.smb_port || 0
     // 加载已保存的网址（协议白名单容错）
     try {
       const res = await serverApi.urlList(row.id)
@@ -263,17 +290,11 @@ function openSftp(row) { router.push({ path: '/sftp', query: { server_id: row.id
 // ===== 远程桌面（Windows 服务器） =====
 function openRemote(cmd, row) {
   if (cmd === 'local') return downloadRdp(row)
-  if (cmd === 'copy') {
-    navigator.clipboard.writeText(row.password || '')
-      .then(() => ElMessage.success('登录密码已复制'))
-      .catch(() => ElMessage.error('复制失败，请在编辑中查看密码'))
-    return
-  }
-  // h5：先取一次性凭证，再进入全屏桌面页
+  // h5：先取一次性凭证，再进入全屏桌面页（Linux 走 VNC 协议）
   rdpApi.token(row.id).then(res => {
     const token = res.data && res.data.token
     if (!token) return
-    router.push({ path: `/rdp/${row.id}`, query: { token } })
+    router.push({ path: `/rdp/${row.id}`, query: { token, proto: res.data.proto || 'rdp' } })
   }).catch(() => {}) // 错误提示由 request 拦截器统一展示
 }
 // 生成 .rdp 文件下载，mstsc 打开后输入密码（.rdp 无法内嵌明文密码）
@@ -342,6 +363,8 @@ onMounted(() => { loadGroups(); loadList() })
 .url-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
 .urls-tip { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .urls-tip span { font-size: calc(12px * var(--fs, 1)); color: #909399; line-height: 1.5; }
+.vnc-editor { display: flex; align-items: center; gap: 10px; }
+.vnc-label { font-size: calc(13px * var(--fs, 1)); color: #606266; }
 
 /* 操作列：紧凑单行不换行 */
 .op-cell { display: flex; align-items: center; gap: 2px; white-space: nowrap; }

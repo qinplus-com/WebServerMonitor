@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"strings"
+
 	"qinjiagateway/dao"
 	"qinjiagateway/demo"
 	"qinjiagateway/license"
@@ -91,6 +93,23 @@ func ServerAdd(c *gin.Context) {
 	if req.OsType != "windows" {
 		req.OsType = "linux"
 	}
+	// Windows 文件管理共享名（SMB）：去除首尾空白，Linux 忽略
+	req.SmbShare = strings.TrimSpace(req.SmbShare)
+	if req.OsType != "windows" {
+		req.SmbShare = ""
+	}
+	if req.VncPort < 0 {
+		req.VncPort = 0
+	}
+	if req.VncPort > 65535 {
+		req.VncPort = 65535
+	}
+	if req.SmbPort < 0 {
+		req.SmbPort = 0
+	}
+	if req.SmbPort > 65535 {
+		req.SmbPort = 65535
+	}
 	if req.Port == 0 {
 		if req.OsType == "windows" {
 			req.Port = 3389
@@ -133,6 +152,26 @@ func ServerEdit(c *gin.Context) {
 	// 服务器类型（非空才更新，兼容旧版前端）
 	if req.OsType != "" {
 		updates["os_type"] = req.OsType
+	}
+	// Linux VNC 远程桌面端口（0=关闭）
+	if req.VncPort < 0 {
+		req.VncPort = 0
+	}
+	if req.VncPort > 65535 {
+		req.VncPort = 65535
+	}
+	if req.SmbPort < 0 {
+		req.SmbPort = 0
+	}
+	if req.SmbPort > 65535 {
+		req.SmbPort = 65535
+	}
+	updates["vnc_port"] = req.VncPort
+	updates["smb_port"] = req.SmbPort
+	// Windows 文件管理共享名（SMB）：去除首尾空白；Linux/空值清空
+	updates["smb_share"] = strings.TrimSpace(req.SmbShare)
+	if req.OsType == "linux" {
+		updates["smb_share"] = ""
 	}
 	// 空密码/空私钥表示不修改（前端掩码占位），保留原值；非空则加密更新
 	if req.Password != "" {

@@ -20,3 +20,10 @@ html, body, #app {
 ::-webkit-scrollbar-track {
   background: var(--scrollbar-track, #f0f2f5);
 }
+
+/* 错误解决方案对话框：多行文案按换行展示（Sftp.vue / Rdp.vue 共用） */
+.msgbox-pre .el-message-box__message {
+  white-space: pre-line;
+  line-height: 1.8;
+}
+

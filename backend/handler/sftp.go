@@ -119,6 +119,11 @@ func SftpList(c *gin.Context) {
 	if !ok {
 		return
 	}
+	// Windows 服务器无 SSH/SFTP，走 SMB 管理共享（见 smb.go）
+	if server.OsType == "windows" {
+		smbList(c, server, path)
+		return
+	}
 	client, conn, err := getSftpClient(server)
 	if err != nil {
 		utils.Fail(c, err.Error())
@@ -166,6 +171,11 @@ func SftpOperate(c *gin.Context) {
 	}
 	server, ok := checkServerPermission(c, req.ServerID)
 	if !ok {
+		return
+	}
+	// Windows 服务器无 SSH/SFTP，走 SMB 管理共享（见 smb.go）
+	if server.OsType == "windows" {
+		smbOperate(c, server, req.Path, req.OperateType, req.NewName)
 		return
 	}
 	client, conn, err := getSftpClient(server)
@@ -222,6 +232,13 @@ func SftpUpload(c *gin.Context) {
 	}
 	defer file.Close()
 
+	// Windows 服务器无 SSH/SFTP，走 SMB 管理共享（见 smb.go）
+	relativePath := c.PostForm("relative_path")
+	if server.OsType == "windows" {
+		smbUpload(c, server, targetPath, file, header.Size, relativePath, header.Filename)
+		return
+	}
+
 	client, conn, err := getSftpClient(server)
 	if err != nil {
 		utils.Fail(c, err.Error())
@@ -231,7 +248,6 @@ func SftpUpload(c *gin.Context) {
 	defer conn.Close()
 
 	// 解析目标路径：relative_path 非空时保留文件夹目录结构（文件夹上传），否则用单文件名
-	relativePath := c.PostForm("relative_path")
 	var dstPath string
 	if relativePath != "" {
 		// 清洗：统一为 POSIX 路径，去掉前导分隔符，禁止 .. 越权跳出 targetPath
@@ -298,6 +314,11 @@ func SftpDownload(c *gin.Context) {
 
 	server, ok := checkServerPermission(c, sid)
 	if !ok {
+		return
+	}
+	// Windows 服务器无 SSH/SFTP，走 SMB 管理共享（见 smb.go）
+	if server.OsType == "windows" {
+		smbDownload(c, server, filePath)
 		return
 	}
 	client, conn, err := getSftpClient(server)

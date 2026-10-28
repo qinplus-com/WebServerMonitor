@@ -30,6 +30,9 @@ type Server struct {
 	IP         string    `gorm:"size:64;not null" json:"ip"`
 	Port       int       `gorm:"default:22" json:"port"`
 	OsType     string    `gorm:"size:16;default:linux" json:"os_type"` // linux / windows
+	VncPort    int       `gorm:"default:0" json:"vnc_port"`            // Linux VNC 端口（0=未开启远程桌面）
+	SmbShare   string    `gorm:"size:64;default:''" json:"smb_share"`  // Windows 文件管理共享名（SMB 共享文件夹）
+	SmbPort    int       `gorm:"default:0" json:"smb_port"`            // SMB 端口（0=默认 445，公网端口映射场景可自定义）
 	Username   string    `gorm:"size:64;not null" json:"username"`
 	AuthType   string    `gorm:"size:16;default:password" json:"auth_type"` // password / key
 	Password   string    `gorm:"size:255" json:"password"`                  // 管理员可见，普通用户接口返回前清空

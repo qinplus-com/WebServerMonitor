@@ -322,6 +322,9 @@ func buildRouter() *gin.Engine {
 			c.String(404, "前端资源缺失")
 			return
 		}
+		// index.html 不缓存：升级后浏览器必须重新拉取，否则旧页引用的
+		// hash 资源可能已被清理导致白屏；hash 资源本身由文件服务缓存
+		c.Header("Cache-Control", "no-cache")
 		c.Data(200, "text/html; charset=utf-8", data)
 	})
 
