@@ -10,8 +10,33 @@
       </el-select>
       <span class="t-res">{{ resText }}</span>
       <span class="t-spacer"></span>
+      <button v-if="!isVnc" class="t-btn" @mousedown.prevent @click="toggleFilesPanel"><el-icon><component :is="'FolderOpened'" /></el-icon>文件传输</button>
       <button class="t-btn" @mousedown.prevent @click="toggleFs"><el-icon><component :is="isFullscreen ? 'Aim' : 'FullScreen'" /></el-icon>{{ isFullscreen ? '退出全屏' : '全屏' }}</button>
       <button class="t-btn danger" @mousedown.prevent @click="leave"><el-icon><SwitchButton /></el-icon>断开</button>
+    </div>
+
+    <!-- 文件传输面板（Windows RDP）：经目标机 SMB 共享文件夹中转，实现本地与远程桌面文件互传 -->
+    <div v-if="filesPanel" class="rdp-files" @mousedown.stop @click.stop @dragover.prevent @drop.prevent="onTransferDrop">
+      <div class="f-head">
+        <span>文件传输</span>
+        <button class="t-btn" @mousedown.prevent @click="toggleFilesPanel"><el-icon><component :is="'Close'" /></el-icon></button>
+      </div>
+      <div class="f-upload" @click="transferInput && transferInput.click()">
+        <el-icon class="f-upload-icon"><component :is="'Upload'" /></el-icon>
+        <span>点击选择文件上传到远程桌面</span>
+        <span class="f-prog" v-if="transferUploading">上传中 {{ transferDone }}/{{ transferTotal }}</span>
+      </div>
+      <div class="f-list" v-loading="transferLoading">
+        <div v-for="f in transferFiles" :key="f.name" class="f-item">
+          <el-icon :class="f.is_dir ? 'is-dir' : ''"><component :is="f.is_dir ? 'Folder' : 'Document'" /></el-icon>
+          <span class="f-name" :title="f.name">{{ f.name }}</span>
+          <span class="f-size">{{ f.is_dir ? '' : fmtSize(f.size) }}</span>
+          <button v-if="!f.is_dir" class="t-btn" @mousedown.prevent @click="downloadTransfer(f)"><el-icon><component :is="'Download'" /></el-icon>下载</button>
+        </div>
+        <p v-if="!transferLoading && !transferFiles.length" class="f-empty">共享文件夹为空</p>
+      </div>
+      <p class="f-tip">文件经目标机共享文件夹中转：上传后在远程桌面内打开 \\localhost\共享名 即可使用；下载仅支持共享根目录文件，深层目录请用「文件」管理页。</p>
+      <input ref="transferInput" type="file" multiple hidden @change="onTransferPicked" />
     </div>
 
     <!-- 远程画面 -->
@@ -42,7 +67,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import Guacamole from 'guacamole-common-js'
-import { rdpApi } from '../api'
+import { rdpApi, sftpApi } from '../api'
 
 // 鼠标/触摸坐标换算补丁：guacamole-common-js 的 Guacamole.Position.fromClientPosition
 // 仅按 offsetLeft/offsetTop 链换算，不感知 CSS transform 缩放；而 fitSize() 对 display
@@ -398,6 +423,93 @@ function toggleFs() {
   }
 }
 
+// ===== 文件传输面板（Windows RDP）：经 SMB 共享文件夹实现本地与远程桌面文件互传 =====
+const serverId = Number(route.params.id) || 0
+const filesPanel = ref(false)
+const transferFiles = ref([])
+const transferLoading = ref(false)
+const transferUploading = ref(false)
+const transferTotal = ref(0)
+const transferDone = ref(0)
+const transferInput = ref(null)
+
+function toggleFilesPanel() {
+  filesPanel.value = !filesPanel.value
+  // 面板打开期间工具条保持常显（否则收起后只能靠面板自身按钮关闭）
+  toolbarHover.value = filesPanel.value
+  if (filesPanel.value) loadTransferFiles()
+}
+
+async function loadTransferFiles() {
+  transferLoading.value = true
+  try {
+    // silent：错误不走全局 toast，用对话框完整展示解决方案（如未配置共享名）
+    const res = await sftpApi.list({ server_id: serverId, path: '/' }, { silent: true })
+    transferFiles.value = res.data.files || []
+  } catch (e) {
+    filesPanel.value = false
+    toolbarHover.value = false
+    ElMessageBox.alert(e.message || '读取共享文件夹失败', '文件传输', {
+      confirmButtonText: '知道了',
+      customClass: 'msgbox-pre'
+    }).catch(() => {})
+  } finally { transferLoading.value = false }
+}
+
+async function uploadTransferFiles(fileList) {
+  const files = Array.from(fileList || [])
+  if (!files.length || transferUploading.value) return
+  transferUploading.value = true
+  transferTotal.value = files.length
+  transferDone.value = 0
+  let failed = 0
+  for (const f of files) {
+    try {
+      const fd = new FormData()
+      fd.append('file', f)
+      fd.append('server_id', serverId)
+      fd.append('target_path', '/')
+      await sftpApi.upload(fd)
+    } catch (e) { failed++ }
+    transferDone.value++
+  }
+  transferUploading.value = false
+  if (failed === 0) ElMessage.success(`已上传 ${files.length} 个文件到共享文件夹`)
+  else ElMessage.warning(`成功 ${files.length - failed} 个，失败 ${failed} 个`)
+  loadTransferFiles()
+}
+
+function onTransferPicked(e) {
+  uploadTransferFiles(e.target.files)
+  e.target.value = ''
+}
+
+function onTransferDrop(e) {
+  uploadTransferFiles(e.dataTransfer && e.dataTransfer.files)
+}
+
+function fmtSize(n) {
+  if (n == null) return ''
+  if (n < 1024) return n + ' B'
+  if (n < 1048576) return (n / 1024).toFixed(1) + ' KB'
+  if (n < 1073741824) return (n / 1048576).toFixed(1) + ' MB'
+  return (n / 1073741824).toFixed(2) + ' GB'
+}
+
+async function downloadTransfer(f) {
+  try {
+    const res = await sftpApi.download({ server_id: serverId, file_path: '/' + f.name })
+    const url = URL.createObjectURL(res.data)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = f.name
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    ElMessage.error(e.message || '下载失败')
+  }
+}
+
 function leave() {
   if (client) client.disconnect()
   router.push('/servers')
@@ -527,4 +639,73 @@ onBeforeUnmount(() => {
   animation: spin .9s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* 文件传输面板：右上角悬浮抽屉，风格与工具条一致 */
+.rdp-files {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 40;
+  width: 340px;
+  max-height: calc(100% - 20px);
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  background: rgba(15, 22, 32, .92);
+  border: 1px solid rgba(255, 255, 255, .12);
+  backdrop-filter: blur(10px);
+  color: #cfd8e3;
+  font-size: 13px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, .45);
+}
+.f-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, .08);
+  font-weight: 600;
+}
+.f-upload {
+  margin: 12px 14px 0;
+  padding: 16px 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  border: 1px dashed rgba(255, 255, 255, .22);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all .2s;
+  text-align: center;
+}
+.f-upload:hover { border-color: #4f9cff; background: rgba(79, 156, 255, .08); }
+.f-upload-icon { font-size: 22px; color: #4f9cff; }
+.f-prog { color: #fbbf24; font-size: 12px; }
+.f-list {
+  flex: 1;
+  overflow-y: auto;
+  margin: 10px 14px;
+  min-height: 80px;
+}
+.f-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, .05);
+}
+.f-item .is-dir { color: #e6a23c; }
+.f-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.f-size { color: #9fb3c8; font-size: 12px; flex-shrink: 0; }
+.f-empty { text-align: center; color: #6b7c8f; padding: 18px 0; margin: 0; }
+.f-tip {
+  margin: 0 14px 12px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(79, 156, 255, .08);
+  color: #9fb3c8;
+  font-size: 12px;
+  line-height: 1.6;
+}
 </style>

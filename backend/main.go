@@ -317,6 +317,12 @@ func buildRouter() *gin.Engine {
 			c.JSON(404, gin.H{"code": 404, "msg": "接口不存在"})
 			return
 		}
+		// hash 静态资源缺失（升级后旧页面引用已清理的 chunk）直接 404，
+		// 避免回退 index.html 让浏览器把 HTML 当 JS 执行产生费解的报错
+		if strings.HasPrefix(c.Request.URL.Path, "/assets/") || strings.HasPrefix(c.Request.URL.Path, "/features/") {
+			c.String(404, "not found")
+			return
+		}
 		data, err := staticEmbed.ReadFile("static/index.html")
 		if err != nil {
 			c.String(404, "前端资源缺失")
