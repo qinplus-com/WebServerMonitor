@@ -134,6 +134,7 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags opensource -o gateway .   #
 ## 文档
 
 - [使用文档](docs/使用文档.md)
+- [User Guide (English, machine-translated)](docs/User-Guide.md)
 - [版本规划](ROADMAP.md)
 - [参与贡献](CONTRIBUTING.md)
 - [第三方组件许可声明](THIRD-PARTY-NOTICES.md)
