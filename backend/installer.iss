@@ -2,12 +2,12 @@
 ; 勤加软件WEB服务器运维管理平台 - Inno Setup 安装脚本
 ; 支持安装时自定义软件名称（平台标题/服务名/快捷方式联动）+ 用户协议
 ; ============================================================
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.0.1"
 ; 编译期开关：ISCC /DCOMMUNITY_EDITION 生成社区版安装包（默认选社区版、独立文件名）；
 ; 不带参数则为商业版安装包（默认选个人版）
 #ifdef COMMUNITY_EDITION
 #define DefaultAppName "勤加软件WEB服务器运维管理平台（社区版）"
-#define OutputBase "WebServerMonitor-社区版-1.0.0-Windows-x64-安装版"
+#define OutputBase "WebServerMonitor-社区版-1.0.1-Windows-x64-安装版"
 #define DefaultEdition "community"
 #else
 #define DefaultAppName "勤加软件WEB服务器运维管理平台"
@@ -48,13 +48,18 @@ Name: "desktopicon"; Description: "创建桌面快捷方式（浏览器访问 + 
 
 [Files]
 Source: "gateway.exe"; DestDir: "{app}"; Flags: ignoreversion
+; 内置 RDP 引擎（rdpd，独立 GPL-3.0 组件）：H5 远程桌面开箱即用，需与网关同目录
+Source: "rdpd.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "app.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "manager.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "manager.vbs"; DestDir: "{app}"; Flags: ignoreversion
 Source: "qinplus.png"; DestDir: "{app}"; Flags: ignoreversion
 Source: "用户许可协议.txt"; DestDir: "{app}"; Flags: ignoreversion
+#ifndef COMMUNITY_EDITION
 ; 主机指纹采集工具（客户侧使用，用于生成授权）；licgui 为内部授权生成工具，禁止随包分发
+; 社区版不随包分发（开源版已移除机器指纹相关内容）
 Source: "fingerprint.exe"; DestDir: "{app}"; Flags: ignoreversion
+#endif
 
 [Icons]
 ; 快捷方式说明：

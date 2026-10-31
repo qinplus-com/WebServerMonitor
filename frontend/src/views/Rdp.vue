@@ -1,14 +1,30 @@
 <template>
   <div class="rdp-page" :class="{ 'in-fs': isFullscreen }" @dragover.prevent @drop.prevent="onPageDrop">
-    <!-- 顶部悬浮工具条：3 秒无鼠标活动自动收起，移动鼠标唤醒 -->
+    <!-- 顶部悬浮工具条：3 秒无鼠标活动自动收起，顶部热区/移动鼠标唤醒 -->
+    <!-- 隐藏后的唤出热区：顶部中央窄条常驻，悬停即唤出工具栏 -->
+    <div v-if="!toolbarVisible" class="tb-strip" title="显示工具栏"></div>
     <div class="rdp-toolbar" :class="{ hide: !toolbarVisible }" @mouseenter="toolbarHover = true" @mouseleave="toolbarHover = false">
       <span class="dot" :class="statusClass"></span>
       <span class="t-status">{{ statusText }}</span>
-      <el-select v-if="!isVnc" v-model="resSel" size="small" class="t-res-sel" @change="onResChange" @visible-change="resSelectOpen = $event" @keydown.stop>
+      <el-select v-if="!isVnc" ref="resSelRef" v-model="resSel" size="small" class="t-res-sel" @change="onResChange" @visible-change="(v) => onSelVisible(v, resSelRef)" @keydown.stop>
         <el-option value="auto" label="自动" />
         <el-option v-for="o in RES_OPTIONS" :key="o" :value="o" :label="o" />
       </el-select>
+      <!-- VNC：点击切换远端桌面分辨率（SSH 执行 xrandr，画面随 DesktopSize 自动跟随） -->
+      <el-select v-else ref="vncResSelRef" v-model="vncResSel" size="small" class="t-res-sel" :loading="vncResLoading" :disabled="status !== 'connected'" placeholder="分辨率" @visible-change="(v) => onVncResOpen(v, vncResSelRef)" @change="onVncResChange" @keydown.stop>
+        <el-option v-for="o in vncResOptions" :key="o" :value="o" :label="o" />
+      </el-select>
       <span class="t-res">{{ resText }}</span>
+      <!-- 画质/帧率档位（对齐商用远控"手动挡"）：变更后无缝重连会话生效 -->
+      <el-select ref="qualitySelRef" v-model="qualitySel" size="small" class="t-q-sel" title="画质档位（变更后自动重连）" @change="onQualityChange" @visible-change="(v) => onSelVisible(v, qualitySelRef)" @keydown.stop>
+        <el-option value="fluent" label="流畅" />
+        <el-option value="normal" label="超清" />
+        <el-option value="high" label="原画" />
+      </el-select>
+      <el-select ref="fpsSelRef" v-model="fpsSel" size="small" class="t-fps-sel" title="帧率上限（变更后自动重连）" @change="onFpsChange" @visible-change="(v) => onSelVisible(v, fpsSelRef)" @keydown.stop>
+        <el-option :value="30" label="30帧" />
+        <el-option :value="60" label="60帧" />
+      </el-select>
       <span class="t-spacer"></span>
       <button v-if="!isVnc" class="t-btn" @mousedown.prevent @click="toggleFilesPanel"><el-icon><component :is="'FolderOpened'" /></el-icon>文件传输</button>
       <button class="t-btn" @mousedown.prevent @click="toggleFs"><el-icon><component :is="isFullscreen ? 'Aim' : 'FullScreen'" /></el-icon>{{ isFullscreen ? '退出全屏' : '全屏' }}</button>
@@ -105,11 +121,29 @@ let curEl = null // 当前正在展示的 display 元素（seamless 切换时新
 let onFsChange = null
 let onWinResize = null
 let onPaste = null
+let onVisChange = null
+let onTabGuard = null
 let resizeTimer = null
 let curW = window.innerWidth
 let curH = window.innerHeight
 let reconnecting = false
 let rescalePending = false // 重连期间又收到分辨率调整请求：完成后补跑一次，避免竞态卡住
+
+// ===== H.264 视频通道（WebCodecs）=====
+// 检测通过后 WS URL 携带 codec=h264，rdpd 启用 ffmpeg 帧间压缩管线（h264.go），
+// 以 h264 指令逐帧下发 Annex-B 码流，前端解码后直绘默认层画布——相比 tile 管线，
+// 全屏连续变化（拖拽/滚动）场景带宽降低一个数量级，帧延迟更稳定。
+// 任一环节不支持/失败均静默回退传统 tile 管线（rdpd 端 ffmpeg 缺失时同样回退）。
+let h264OK = false
+let h264State = null // 当前会话解码状态 { decoder, kf, close }
+async function detectH264() {
+  if (typeof VideoDecoder === 'undefined' || typeof EncodedVideoChunk === 'undefined') return false
+  try {
+    // baseline profile（avc1.42002a）：rdpd 端 x264 以 baseline/ultrafast 编码，兼容性最佳
+    const sup = await VideoDecoder.isConfigSupported({ codec: 'avc1.42002a', optimizeForLatency: true })
+    return !!sup.supported
+  } catch (e) { return false }
+}
 
 const statusText = computed(() =>
   ({ connecting: '连接中', connected: '已连接', closed: '已断开' }[status.value] || status.value))
@@ -122,6 +156,11 @@ const statusClass = computed(() =>
 const toolbarVisible = ref(true)
 const toolbarHover = ref(false)
 const resSelectOpen = ref(false)
+// 工具栏下拉组件引用：下拉关闭时 blur 自身，防止焦点滞留劫持远端键盘输入
+const resSelRef = ref(null)
+const vncResSelRef = ref(null)
+const qualitySelRef = ref(null)
+const fpsSelRef = ref(null)
 let toolbarTimer = null
 let onToolbarWake = null
 function scheduleToolbarHide() {
@@ -205,6 +244,7 @@ function fitSize() {
 
 // 彻底清理会话并清空画面（仅页面离开时使用；分辨率重连走 seamless 切换，不走这里）
 function cleanupSession() {
+  if (h264State) { h264State.close(); h264State = null }
   if (client) client.disconnect()
   client = null
   if (keyboard) keyboard.onkeydown = keyboard.onkeyup = null
@@ -221,11 +261,116 @@ function onResChange() {
   requestRescale() // 当前会话已是所选分辨率时 requestRescale 会自动跳过，不重复重连
 }
 
+// ===== 画质/帧率档位（对齐商用远控的"手动挡"）=====
+// quality: fluent=流畅(CRF25,带宽敏感) / normal=超清(CRF21) / high=原画(CRF17,近无损)
+// fps: 渲染帧率上限 30/60（60 帧拖拽/滚动更顺滑，CPU/带宽相应增加）
+// 编码参数在会话建立时确定，变更后无缝重连（seamless：旧画面保留至新会话就绪）。
+// 默认流畅档：带宽敏感的 Linux 服务器场景体验最优，需要更清晰可手动切超清/原画。
+// 存储键升级 v2：旧键残留的旧默认"超清"会掩盖新默认，键名换代使新默认全员生效
+const qualitySel = ref(localStorage.getItem('rdp_quality2') || 'fluent')
+const fpsSel = ref(Number(localStorage.getItem('rdp_fps')) || 30)
+function onQualityChange(v) {
+  localStorage.setItem('rdp_quality2', v)
+  reconnectForSettings()
+}
+function onFpsChange(v) {
+  localStorage.setItem('rdp_fps', String(v))
+  reconnectForSettings()
+}
+// 设置变更重连：与 requestRescale 同一套 seamless 流程，但不比较尺寸差异
+function reconnectForSettings() {
+  if (reconnecting) {
+    rescalePending = true
+    return
+  }
+  if (status.value !== 'connected') return
+  reconnecting = true
+  status.value = 'connecting' // 仅工具条状态点提示，不遮画面
+  rdpApi.token(route.params.id).then(res => {
+    const token = res.data && res.data.token
+    if (!token) {
+      reconnecting = false
+      status.value = 'connected'
+      ElMessage.error('无法获取连接凭证，保持当前画面')
+      return
+    }
+    startSession(token, true)
+  }).catch(() => {
+    reconnecting = false
+    status.value = 'connected'
+    ElMessage.error('设置应用失败，保持当前画面')
+  })
+}
+
+// ===== VNC 分辨率下拉：查询/切换目标机 VNC 桌面分辨率（后端 SSH 执行 xrandr） =====
+// 切换后 Xvnc 推送 DesktopSize，rdpd 同步前端画布尺寸，resText 随之更新，无需重连。
+const vncResSel = ref('')
+const vncResOptions = ref([])
+const vncResLoading = ref(false)
+let vncResLoaded = false
+let vncResPrev = '' // 最近一次确认有效的分辨率（切换失败时回退显示）
+
+async function loadVncResolutions() {
+  vncResLoading.value = true
+  try {
+    const res = await rdpApi.vncResolutions(serverId)
+    vncResOptions.value = res.data.modes || []
+    const cur = (res.data.current || '').replace(/×/g, 'x')
+    if (cur) {
+      vncResSel.value = cur
+      vncResPrev = cur
+    }
+    vncResLoaded = true
+  } catch (e) {
+    ElMessage.error(e.message || '获取分辨率列表失败')
+  } finally {
+    vncResLoading.value = false
+  }
+}
+
+function onVncResOpen(open, sel) {
+  onSelVisible(open, sel)
+  if (open && !vncResLoaded && status.value === 'connected') loadVncResolutions()
+}
+
+// 工具栏下拉关闭即失焦：焦点滞留在 el-select 内时（组件有 @keydown.stop），
+// 终端按键全部被本地吞掉——远端收不到字符（表现为命令未执行），且回车/
+// 方向键会再次弹开下拉菜单、误触分辨率切换。关闭即 blur，键盘控制权交还远端。
+function onSelVisible(v, sel) {
+  resSelectOpen.value = v
+  if (!v && sel && typeof sel.blur === 'function') sel.blur()
+}
+
+async function onVncResChange(v) {
+  if (!v || v === vncResPrev) return
+  const prev = vncResPrev
+  vncResLoading.value = true
+  try {
+    await rdpApi.vncResolution({ server_id: serverId, resolution: v })
+    vncResPrev = v
+    ElMessage.success('分辨率已切换为 ' + v + '，画面即将自动适配')
+  } catch (e) {
+    ElMessage.error(e.message || '切换分辨率失败')
+    vncResSel.value = prev
+  } finally {
+    vncResLoading.value = false
+  }
+}
+
+// 画布尺寸变化（含切换分辨率后的 DesktopSize）同步到下拉当前值
+watch(resText, (v) => {
+  if (!v) return
+  const norm = v.replace(/×/g, 'x')
+  vncResSel.value = norm
+  vncResPrev = norm
+})
+
 // 请求分辨率规则：
-//   自动模式：跟随窗口实际大小（物理像素）——远端会话与显示区域 1:1 像素对应，
-//             文字像素级清晰、画面充满窗口无黑边；全屏时为客户机屏幕物理分辨率。
-//             窗口尺寸变化时由 requestRescale 无缝重连跟进。
-//   手动模式：使用下拉所选分辨率（此时显示层等比缩放，清晰度受缩放采样影响）。
+//   自动模式：跟随窗口实际大小；HiDPI（devicePixelRatio）不放大请求——会话像素量
+//             直接决定服务端编码/网络传输/解码的每一环延迟，像素翻倍=延迟翻倍，
+//             而高倍率下的清晰度收益边际递减；会话总像素超过 1920×1200（2.3MP）
+//             时按比例收缩，显示层再等比适配窗口。
+//   手动模式：使用下拉所选分辨率（显示层等比缩放适配窗口）。
 // Windows RDP 重连必然把会话改成请求的分辨率。
 function desiredSize() {
   if (resSel.value !== 'auto') {
@@ -233,10 +378,21 @@ function desiredSize() {
     return [Number(p[0]), Number(p[1])]
   }
   const dpr = window.devicePixelRatio || 1
+  let w, h
   if (isFullscreen.value) {
-    return [Math.round(window.screen.width * dpr), Math.round(window.screen.height * dpr)]
+    w = Math.round(window.screen.width * dpr)
+    h = Math.round(window.screen.height * dpr)
+  } else {
+    w = Math.round(window.innerWidth * dpr)
+    h = Math.round(window.innerHeight * dpr)
   }
-  return [Math.round(window.innerWidth * dpr), Math.round(window.innerHeight * dpr)]
+  const cap = 1920 * 1200
+  if (w * h > cap) {
+    const s = Math.sqrt(cap / (w * h))
+    w = Math.round(w * s)
+    h = Math.round(h * s)
+  }
+  return [w, h]
 }
 
 // startSession 建立会话。
@@ -250,9 +406,80 @@ function startSession(token, seamless) {
   curW = req[0]
   curH = req[1]
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-  const tunnel = new Guacamole.WebSocketTunnel(`${proto}://${location.host}/ws/rdp?token=${encodeURIComponent(token)}&w=${curW}&h=${curH}`)
+  const tunnel = new Guacamole.WebSocketTunnel(`${proto}://${location.host}/ws/rdp?token=${encodeURIComponent(token)}&w=${curW}&h=${curH}` + (h264OK ? '&codec=h264' : '') + `&quality=${qualitySel.value}&fps=${fpsSel.value}`)
   const newClient = new Guacamole.Client(tunnel)
   client = newClient
+
+  // ===== H.264 视频通道：解码直绘默认层画布 =====
+  // 视频模式下 rdpd 不再发 png/jpeg tile，默认层画布无其他绘制者，直接绘入；
+  // 光标层位于默认层之上，本地光标不受影响。
+  const h264Prev = h264State // 旧会话解码状态（seamless 切换在画面替换时关闭）
+  if (h264OK) {
+    const canvas = newClient.getDisplay().getDefaultLayer().getCanvas()
+    const st = { decoder: null, ts: 0, lastKf: 0, fresh: false }
+    st.close = () => { try { if (st.decoder) st.decoder.close() } catch (e) { /* 已关闭 */ } st.decoder = null }
+    st.kf = (force) => {
+      // 请求关键帧：rdpd 重建编码器，新码流首帧必为 IDR。节流防连续触发；
+      // 解码器重建/关键帧丢失场景 force 强制发送（节流会吞掉重同步请求，
+      // 导致新解码器一直收 delta 帧、参考缺失输出绿屏）
+      const now = Date.now()
+      if (!force && now - st.lastKf < 3000) return
+      st.lastKf = now
+      try { tunnel.sendMessage(['keyframe']) } catch (e) { /* 通道已关闭 */ }
+    }
+    const setupDecoder = () => {
+      st.fresh = true // 新解码器未建立参考链：必须先拿到关键帧
+      st.decoder = new VideoDecoder({
+        output: (vf) => {
+          try { canvas.getContext('2d').drawImage(vf, 0, 0, vf.displayWidth, vf.displayHeight) } catch (e) { /* 画布瞬态未就绪，下一帧自愈 */ }
+          vf.close()
+        },
+        error: () => {
+          // 解码链损坏：重建解码器并强制请求关键帧重新同步
+          st.close()
+          setupDecoder()
+          st.kf(true)
+        }
+      })
+      st.decoder.configure({ codec: 'avc1.42002a', optimizeForLatency: true })
+    }
+    setupDecoder()
+    h264State = st
+    // 拦截 h264 指令（Client 构造时已挂载自身处理器，此处包装透传其余指令）
+    const clientHandler = tunnel.oninstruction
+    tunnel.oninstruction = (opcode, args) => {
+      if (opcode === 'h264') {
+        const b64 = args && args[0]
+        if (b64 && st.decoder && st.decoder.state === 'configured') {
+          const bin = atob(b64)
+          const bytes = new Uint8Array(bin.length)
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+          // 首个 VCL NAL 为 IDR(5) 或携带 SPS(7) 判为关键帧（rdpd 按访问单元逐帧下发）
+          let isKey = false
+          for (let i = 0; i + 3 < bytes.length; i++) {
+            if (bytes[i] === 0 && bytes[i + 1] === 0 && bytes[i + 2] === 1) {
+              const t = bytes[i + 3] & 0x1F
+              if (t === 5 || t === 7) { isKey = true; break }
+            }
+          }
+          if (st.fresh && !isKey) {
+            // 解码器新建/重建后首个到达帧不是关键帧：configure 异步窗口期的
+            // 关键帧已被丢弃，直接解 delta 会因参考缺失输出绿帧——丢弃并
+            // 强制请求关键帧重新同步
+            st.kf(true)
+            return
+          }
+          st.fresh = false
+          try {
+            st.decoder.decode(new EncodedVideoChunk({ type: isKey ? 'key' : 'delta', timestamp: st.ts, data: bytes }))
+            st.ts += 33333
+          } catch (e) { st.kf(true) }
+        }
+        return
+      }
+      clientHandler(opcode, args)
+    }
+  }
 
   tunnel.onerror = () => {
     if (client !== newClient) return // 旧会话退役，静默
@@ -323,11 +550,13 @@ function startSession(token, seamless) {
   const el = newClient.getDisplay().getElement()
   // 远端分辨率就绪/变化 -> seamless 时完成画面替换，随后贴合容器
   newClient.getDisplay().onresize = () => {
-    // 工具条实时显示远端会话真实分辨率（画布位图尺寸）
-    const c = curEl && curEl.querySelector('canvas')
-    if (c && c.width > 0) resText.value = c.width + '×' + c.height
+    // 工具条实时显示远端会话真实分辨率：读 display 逻辑尺寸——
+    // 画布物理尺寸会被 guacamole 对齐到 64 的倍数（如 1080→1088），不是真实分辨率
+    const disp = newClient.getDisplay()
+    if (disp.getWidth() > 0) resText.value = disp.getWidth() + '×' + disp.getHeight()
     if (seamless && el.style.display === 'none') {
       if (oldClient) oldClient.disconnect()
+      if (h264Prev) h264Prev.close() // 旧会话画面已替换，关闭其解码器
       if (oldEl && oldEl.parentNode) oldEl.remove()
       el.style.display = ''
       curEl = el
@@ -393,13 +622,14 @@ function requestRescale() {
   })
 }
 
-function connect() {
+async function connect() {
   const token = route.query.token
   if (!token) {
     mask.value = '缺少连接凭证，请从服务器管理页重新打开'
     status.value = 'closed'
     return
   }
+  h264OK = await detectH264() // WebCodecs 检测：决定是否请求 h264 视频通道
   startSession(token, false)
 
   // 本地 -> 远端剪贴板（粘贴时同步）
@@ -413,6 +643,11 @@ function connect() {
   }
   document.addEventListener('paste', onPaste)
 
+  // 标签页重新可见时请求关键帧：隐藏期间浏览器可能暂停渲染/丢弃解码帧，
+  // 恢复后以 IDR 重建参考链，避免花屏（tile 管线无此问题，请求无副作用）
+  onVisChange = () => { if (!document.hidden && h264State) h264State.kf() }
+  document.addEventListener('visibilitychange', onVisChange)
+
   onWinResize = () => {
     fitSize()
     clearTimeout(resizeTimer)
@@ -420,9 +655,30 @@ function connect() {
   }
   window.addEventListener('resize', onWinResize)
 
-  // 工具条鼠标唤醒：任意移动鼠标重新计时并显示
-  onToolbarWake = wakeToolbar
-  document.addEventListener('mousemove', onToolbarWake)
+  // 工具条鼠标唤醒：guacamole 画布对 mousemove 调用 stopPropagation，
+  // 冒泡阶段挂在 document 上收不到画布内的事件（隐藏后唤不出来的根因），
+  // 必须用捕获阶段监听。隐藏时仅顶部热区（≤48px）唤出，避免操作画面时误弹出；
+  // 显示时任意移动重置 3 秒计时。
+  onToolbarWake = (e) => {
+    if (e.clientY <= 48) {
+      wakeToolbar()
+    } else if (toolbarVisible.value) {
+      scheduleToolbarHide()
+    }
+  }
+  document.addEventListener('mousemove', onToolbarWake, true)
+
+  // Tab 守卫：远端终端的 Tab 补全不应把本地焦点移进工具栏（焦点一旦落进
+  // el-select，按键被 @keydown.stop 吞掉且回车会弹开下拉）。仅阻止浏览器
+  // 默认的焦点移动，事件仍冒泡至 Guacamole.Keyboard 正常下发远端；
+  // 输入类控件（剪贴板/文件面板等）聚焦时不拦截。
+  onTabGuard = (e) => {
+    if (e.key !== 'Tab') return
+    const el = document.activeElement
+    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return
+    e.preventDefault()
+  }
+  document.addEventListener('keydown', onTabGuard)
   scheduleToolbarHide()
 }
 
@@ -581,7 +837,9 @@ onBeforeUnmount(() => {
   if (onFsChange) document.removeEventListener('fullscreenchange', onFsChange)
   if (onWinResize) window.removeEventListener('resize', onWinResize)
   if (onPaste) document.removeEventListener('paste', onPaste)
-  if (onToolbarWake) document.removeEventListener('mousemove', onToolbarWake)
+  if (onVisChange) document.removeEventListener('visibilitychange', onVisChange)
+  if (onToolbarWake) document.removeEventListener('mousemove', onToolbarWake, true)
+  if (onTabGuard) document.removeEventListener('keydown', onTabGuard)
 })
 </script>
 
@@ -625,11 +883,30 @@ onBeforeUnmount(() => {
   box-shadow: 0 4px 18px rgba(0, 0, 0, .45);
   transition: transform .28s ease, opacity .28s ease;
 }
-/* 自动隐藏收起态：移出屏幕顶部并禁用交互，移动鼠标唤醒 */
+/* 自动隐藏收起态：移出屏幕顶部并禁用交互，顶部热区/移动鼠标唤醒 */
 .rdp-toolbar.hide {
   transform: translateX(-50%) translateY(-160%);
   opacity: 0;
   pointer-events: none;
+}
+/* 隐藏后的唤出热区：顶部中央常驻窄条，悬停唤出工具栏 */
+.tb-strip {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 140px;
+  height: 10px;
+  z-index: 29;
+  border-radius: 0 0 10px 10px;
+  background: rgba(255, 255, 255, .16);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .35);
+  cursor: pointer;
+  transition: background .2s ease, height .2s ease;
+}
+.tb-strip:hover {
+  background: rgba(255, 255, 255, .4);
+  height: 16px;
 }
 .dot { width: 8px; height: 8px; border-radius: 50%; }
 .dot.ok { background: #34d399; box-shadow: 0 0 6px #34d399; }
@@ -645,6 +922,19 @@ onBeforeUnmount(() => {
 .t-res-sel :deep(.el-select__placeholder),
 .t-res-sel :deep(.el-select__selected-item) { color: #e5edf5; font-size: 12px; }
 .t-res { color: #9fb3c8; font-size: 12px; min-width: 72px; }
+.t-q-sel { width: 78px; }
+.t-fps-sel { width: 82px; }
+.t-q-sel :deep(.el-select__wrapper),
+.t-fps-sel :deep(.el-select__wrapper) {
+  min-height: 24px;
+  padding: 0 8px;
+  background: rgba(255, 255, 255, .06);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .16) inset;
+}
+.t-q-sel :deep(.el-select__placeholder),
+.t-q-sel :deep(.el-select__selected-item),
+.t-fps-sel :deep(.el-select__placeholder),
+.t-fps-sel :deep(.el-select__selected-item) { color: #e5edf5; font-size: 12px; }
 .t-spacer { flex: 0 0 6px; }
 .t-btn {
   display: inline-flex;

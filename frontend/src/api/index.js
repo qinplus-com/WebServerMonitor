@@ -16,7 +16,10 @@ export const serverApi = {
 
 // H5 远程桌面（Windows RDP）
 export const rdpApi = {
-  token: (server_id) => request.get('/rdp/token', { params: { server_id } })
+  token: (server_id) => request.get('/rdp/token', { params: { server_id } }),
+  // VNC 远程桌面分辨率（SSH xrandr，画面自动跟随）
+  vncResolutions: (server_id) => request.get('/rdp/vnc/resolutions', { params: { server_id }, silent: true }),
+  vncResolution: (data) => request.post('/rdp/vnc/resolution', data, { silent: true })
 }
 
 export const monitorApi = {

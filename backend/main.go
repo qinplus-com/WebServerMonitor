@@ -230,6 +230,9 @@ func buildRouter() *gin.Engine {
 
 			// H5 远程桌面（Windows RDP）
 			auth.GET("/rdp/token", handler.RDPToken)
+			// VNC 远程桌面分辨率查询与调整（SSH 执行 xrandr，画面自动跟随）
+			auth.GET("/rdp/vnc/resolutions", handler.VNCResolutions)
+			auth.POST("/rdp/vnc/resolution", handler.VNCResolution)
 
 			// SFTP
 			auth.GET("/sftp/list", handler.SftpList)

@@ -63,10 +63,18 @@
 | Go 工具链 | BSD-3-Clause |
 | Node.js / npm 生态 | MIT 为主 |
 
+## 独立组件（rdpd 远程桌面引擎）
+
+| 组件 | 许可证 | 说明 |
+|---|---|---|
+| rdpd | GPL-3.0 | 内置 H5 远程桌面引擎（RDP/VNC 协议栈 → Guacamole 指令流），位于 `rdpd/`，以独立进程经 stdio 与网关通信 |
+| grdp（rdpd 内嵌 fork） | GPL-3.0 | 纯 Go RDP 客户端协议库，fork 自 [x90skysn3k/grdp](https://github.com/x90skysn3k/grdp)（上游源自 icodeface/grdp），随源码内嵌于 `rdpd/grdp/` |
+
 ## 许可说明
 
 1. 本项目自身代码以 **Apache-2.0** 许可证发布（见 [LICENSE](LICENSE)）。
 2. SQLite 相关纯 Go 实现（modernc.org/sqlite 及其 libc 依赖）为 BSD-3-Clause，源自 SQLite 公有领域引擎的 Go 移植，无附加义务。
-3. 如需获取本文件的完整自动化清单，可在仓库根目录执行：
+3. rdpd 及其内嵌的 grdp fork 为独立 GPL-3.0 程序，以独立进程方式与本平台（Apache-2.0）聚合分发——两者进程与代码边界清晰，各自许可互不改变；单独使用 rdpd 时请遵循 GPL-3.0。
+4. 如需获取本文件的完整自动化清单，可在仓库根目录执行：
    - Go：`go install github.com/google/go-licenses@latest && go-licenses report ./...`
    - 前端：`npx license-checker --production --json`
