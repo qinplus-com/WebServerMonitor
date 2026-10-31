@@ -1,5 +1,7 @@
 # WebServerMonitor（勤加软件 WEB 服务器运维管理平台 · 社区版）
 
+简体中文 ｜ [English User Guide](docs/User-Guide.md)（Machine-translated）
+
 > 零客户端 · 类 VPN 穿透 · Linux / Windows 服务器统一运维网关
 
 面向中小企业与运维团队的**浏览器端服务器统一访问与运维平台**：无需在被管服务器上安装任何 Agent，通过浏览器即可完成 Web 终端、文件传输、远程桌面、网址可用性监控与多服务器集中管理，体验类 VPN 的统一入口。
